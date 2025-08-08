@@ -1,0 +1,13 @@
+{
+  "cSpell.words": [
+    "bson",
+    "chrono",
+    "creds",
+    "jsonwebtoken",
+    "lettre",
+    "Luma",
+    "qrcode",
+    "serde",
+    "thiserror"
+  ]
+}
