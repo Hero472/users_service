@@ -1,4 +1,4 @@
-use pets::{repo::database::MongoRepository, routes::{private_routes, public_routes}};
+use pets::{repo::database_repository::MongoRepository, routes::{private_routes, public_routes}};
 use pets::services::email::EmailService;
 use actix_web::{get, web, App, HttpServer, Responder};
 use std::env;
@@ -22,10 +22,6 @@ async fn main() -> std::io::Result<()> {
         &env::var("SMTP_USERNAME").expect("SMTP_USERNAME must be set"),
         &env::var("SMTP_PASSWORD").expect("SMTP_PASSWORD must be set"),
     ).expect("Failed to create EmailService");
-
-    email_service.send_email("herodr@outlook.cl", "Test Email", "This is a test email from rust app")
-        .await
-        .expect("Failed to send test email");
 
     let db_url = env::var("DATABASE_URL")
         .expect("DATABASE_URL must be set");

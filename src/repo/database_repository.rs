@@ -51,4 +51,5 @@ impl MongoRepository {
     {
         self.db.collection::<T>(name)
     }
+
 }

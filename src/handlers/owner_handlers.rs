@@ -1,6 +1,6 @@
 use actix_web::{web, HttpResponse, Responder, ResponseError};
 use crate::models::owner::{Owner, OwnerLogin, OwnerReceive};
-use crate::repo::database::MongoRepository;
+use crate::repo::database_repository::MongoRepository;
 use crate::repo::traits::owner_trait::OwnerTrait;
 
 pub async fn create_owner(

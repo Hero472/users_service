@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use futures::StreamExt;
 use mongodb::bson::oid::ObjectId;
 use crate::models::owner::{Owner, OwnerLogin};
-use crate::repo::database::MongoRepository;
+use crate::repo::database_repository::MongoRepository;
 use crate::repo::traits::owner_trait::OwnerTrait;
 use crate::utils::auth::AuthUtils;
 use mongodb::bson::{doc, from_document, to_document, Document};

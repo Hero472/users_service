@@ -7,6 +7,7 @@ use rand::Rng;
 
 use crate::models::email::Email;
 
+#[derive(Clone)]
 pub struct EmailService {
     username: String,
     mailer:  AsyncSmtpTransport<Tokio1Executor>

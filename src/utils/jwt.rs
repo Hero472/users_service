@@ -4,7 +4,7 @@ use actix_web::Error;
 use actix_service::{Service, Transform};
 use futures::{future::{ok, LocalBoxFuture, Ready}, FutureExt};
 use serde::{Deserialize, Serialize};
-use jsonwebtoken::{encode, errors::Result as JwtResult, EncodingKey, Header};
+// use jsonwebtoken::{encode, errors::Result as JwtResult, EncodingKey, Header};
 use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
 
 #[derive(Debug, Serialize, Deserialize)]
