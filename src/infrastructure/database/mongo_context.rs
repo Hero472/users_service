@@ -1,16 +1,16 @@
-use mongodb::{Client, options::ClientOptions, Database, Collection};
 use std::error::Error;
 use serde::{Deserialize, Serialize};
+use mongodb::{Client, options::ClientOptions, Database, Collection};
 
 #[derive(Clone)]
-pub struct MongoRepository {
+pub struct MongoContext {
     client: Client,
     db: Database
 }
 
-impl MongoRepository {
+impl MongoContext {
     
-    pub async fn init(uri: &str, db_name: &str) -> Result<MongoRepository, Box<dyn Error>> {
+    pub async fn init(uri: &str, db_name: &str) -> Result<MongoContext, Box<dyn Error>> {
         println!("Attempting to connect to MongoDB at: {}", uri);
         
         let mut client_options = ClientOptions::parse(uri).await.map_err(|e| {
@@ -25,7 +25,6 @@ impl MongoRepository {
             e
         })?;
         
-        // Test the connection
         client.list_database_names().await.map_err(|e| {
             println!("Failed to connect to MongoDB: {}", e);
             e
@@ -34,7 +33,7 @@ impl MongoRepository {
         let db = client.database(db_name);
         println!("Successfully connected to MongoDB database: {}", db_name);
         
-        Ok(MongoRepository { client, db })
+        Ok(MongoContext { client, db })
     }
 
     pub fn get_db(&self) -> &Database {

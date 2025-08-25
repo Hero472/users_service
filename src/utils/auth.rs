@@ -1,11 +1,20 @@
+use std::error::Error;
 use serde::{Serialize, Deserialize};
-use sha2::{Sha256, Digest};
+use sha2::{digest::generic_array::GenericArray, Digest, Sha256};
 use base64::Engine;
+use aes_gcm::{aead::{Aead, OsRng}, AeadCore, Aes256Gcm, KeyInit, Nonce};
 use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
 use chrono::{Utc, Duration};
 use crate::utils::jwt::Claims;
 
 const SECRET_KEY: &str = "your_secret_key";
+
+const KEY: &str = "another_key";
+
+fn derive_key_from_string(key_str: &str) -> [u8; 32] {
+    let hasher = Sha256::new_with_prefix(key_str.as_bytes());
+    hasher.finalize().into()
+}
 
 #[derive(Serialize, Deserialize)]
 pub struct AuthUtils;
@@ -13,7 +22,7 @@ pub struct AuthUtils;
 impl AuthUtils {
 
     pub fn hash(input: &str) -> Vec<u8> {
-        let mut hasher = Sha256::new();
+        let mut hasher = Sha256::new_with_prefix(input.as_bytes());
         hasher.update(input.as_bytes());
         hasher.finalize().to_vec()
     }
@@ -74,4 +83,44 @@ impl AuthUtils {
         }
     }
 
+    pub fn encrypt(email: &str) -> Result<String, Box<dyn Error>> {
+        
+        let key_bytes = derive_key_from_string(KEY);
+        let key = GenericArray::from_slice(&key_bytes);
+        let cipher = Aes256Gcm::new(key);
+
+        let nonce = Aes256Gcm::generate_nonce(&mut OsRng);
+
+        let cipher_text = cipher.encrypt(&nonce, email.as_bytes())
+            .map_err(|e| format!("Encryption failed: {}", e))?;
+
+        let mut encrypted_data = nonce.to_vec();
+        encrypted_data.extend_from_slice(&cipher_text);
+
+        Ok(base64::engine::general_purpose::STANDARD.encode(encrypted_data))
+    }
+
+
+    pub fn decrypt(encrypted_email: &str) -> Result<String, Box<dyn Error>> {
+
+        let key_bytes = derive_key_from_string(KEY);
+        let key = GenericArray::from_slice(&key_bytes);
+        let cipher = Aes256Gcm::new(key);
+
+        let encrypted_data = base64::engine::general_purpose::STANDARD.decode(encrypted_email)
+            .map_err(|e| format!("Base64 decode failed: {}", e))?;
+
+        if encrypted_data.len() < 12 {
+            return Err("Invalid encrypted data: too short".into());
+        }
+        
+        let (nonce_bytes, cipher_text) = encrypted_data.split_at(12);
+        let nonce = Nonce::from_slice(nonce_bytes);
+        
+        let plaintext = cipher.decrypt(nonce, cipher_text)
+            .map_err(|e| format!("Decryption failed: {}", e))?;
+        
+        String::from_utf8(plaintext)
+            .map_err(|e| format!("Invalid UTF-8: {}", e).into())
+    }
 }

@@ -1,21 +1,22 @@
 use actix_web::web;
 
-use crate::{handlers::owner_handlers::{create_owner, get_all_owners, login_owner}, utils::jwt::JwtMiddleware};
+use crate::utils::jwt::JwtMiddleware;
+use crate::handlers::user_handlers::{create_user, get_all_users, login_user};
 
 pub fn public_routes(cfg: &mut web::ServiceConfig) {
     cfg.service(
         web::resource("/register")
-            .route(web::post().to(create_owner))
+            .route(web::post().to(create_user))
     );
     
     cfg.service(
-        web::resource("/owners")
-            .route(web::get().to(get_all_owners))
+        web::resource("/users")
+            .route(web::get().to(get_all_users))
     );
 
     cfg.service(
         web::resource("/login")
-            .route(web::post().to(login_owner))
+            .route(web::post().to(login_user))
     );
 
 }

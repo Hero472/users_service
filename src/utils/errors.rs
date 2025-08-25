@@ -4,7 +4,7 @@ use thiserror::Error;
 use bson::ser::Error as BsonError;
 use bson::de::Error as BsonDeError;
 
-#[derive(Debug, Error)]
+#[derive(Debug, Error, Clone)]
 pub enum ApiError {
     #[error("Conflict: {0}")]
     Conflict(String),

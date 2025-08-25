@@ -1,2 +1,2 @@
-pub mod owner_handlers;
+pub mod user_handlers;
 pub mod email_handlers;

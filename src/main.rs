@@ -1,5 +1,4 @@
-use pets::{repo::database_repository::MongoRepository, routes::{private_routes, public_routes}};
-use pets::services::email::EmailService;
+use pets::{api::state::AppState, infrastructure::{database::mongo_context::MongoContext, smtp::email_service::SmtpEmailService}, routes::{private_routes, public_routes}};
 use actix_web::{get, web, App, HttpServer, Responder};
 use std::env;
 
@@ -16,8 +15,9 @@ async fn main() -> std::io::Result<()> {
 
     dotenv::dotenv().ok();
 
+    // TODO: confirm create account to confirm the email exists
 
-    let email_service = EmailService::new(
+    let email_service = SmtpEmailService::new(
         &env::var("SMTP_SERVER").expect("SMTP_SERVER must be set"),
         &env::var("SMTP_USERNAME").expect("SMTP_USERNAME must be set"),
         &env::var("SMTP_PASSWORD").expect("SMTP_PASSWORD must be set"),
@@ -26,7 +26,7 @@ async fn main() -> std::io::Result<()> {
     let db_url = env::var("DATABASE_URL")
         .expect("DATABASE_URL must be set");
 
-    let mongo: MongoRepository= match MongoRepository::init(&db_url, "pets_db").await {
+    let mongo_context = match MongoContext::init(&db_url, "pets_db").await {
         Ok(repo) => {
             println!("Connected to MongoDB successfully.");
             repo
@@ -39,15 +39,16 @@ async fn main() -> std::io::Result<()> {
 
     println!("🚀 Server running at http://localhost:8080");
 
-    let mongo_data= web::Data::new(mongo);
+    let mongo_data= web::Data::new(mongo_context);
     let email_data = web::Data::new(email_service);
+
+    let app_state = AppState {db: mongo_data, smtp: email_data };
 
     HttpServer::new(move || {
         println!("Creating new app instance");
 
         App::new()
-            .app_data(mongo_data.clone())
-            .app_data(email_data.clone())
+            .app_data(app_state.clone())
             .configure(public_routes)
             .configure(private_routes)
             .service(entry_point)

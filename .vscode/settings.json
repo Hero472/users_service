@@ -6,6 +6,7 @@
     "jsonwebtoken",
     "lettre",
     "Luma",
+    "Pkcs",
     "qrcode",
     "serde",
     "thiserror"

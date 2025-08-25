@@ -1,6 +1,6 @@
-pub mod models;
-pub mod repo;
 pub mod handlers;
 pub mod utils;
 pub mod routes;
-pub mod services;
+pub mod domain;
+pub mod infrastructure;
+pub mod api;
