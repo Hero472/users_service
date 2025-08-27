@@ -1,4 +1,4 @@
-use pets::{api::state::AppState, infrastructure::{database::mongo_context::MongoContext, smtp::email_service::SmtpEmailService}, routes::{private_routes, public_routes}, utils::config::AppConfig};
+use users_service::{api::state::AppState, infrastructure::{database::mongo_context::MongoContext, smtp::email_service::SmtpEmailService}, routes::{private_routes, public_routes}, utils::config::AppConfig};
 use actix_web::{get, web, App, HttpServer, Responder};
 
 

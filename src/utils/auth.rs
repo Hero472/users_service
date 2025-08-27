@@ -131,3 +131,267 @@ impl AuthUtils {
             .map_err(|e| format!("Invalid UTF-8: {}", e).into())
     }
 }
+
+// ---------------------------------------- TESTS ----------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[cfg(test)]
+    impl AppConfig {
+        pub fn test_config() -> AppConfig {
+            AppConfig {
+                secret_key: "test_secret_key_for_jwt_signing_operations".to_string(),
+                encryption_key: "test_encryption_key_for_aes_operations".to_string(),
+                database_url: "key".to_string(),
+                smtp_server: "key".to_string(),
+                smtp_username: "key".to_string(),
+                smtp_password: "key".to_string(),
+                email_user: "key".to_string(),
+                email_password: "key".to_string(),
+                email_host: "key".to_string(),
+                email_port: "key".to_string(),
+            }
+        }
+    }
+
+    #[test]
+    fn test_hash() {
+        let input = "test_password";
+        let hash1 = AuthUtils::hash(input);
+        let hash2 = AuthUtils::hash(input);
+        
+        assert_eq!(hash1, hash2);
+        
+        // Hash should be 32 bytes (SHA256)
+        assert_eq!(hash1.len(), 32);
+        
+        let different_hash = AuthUtils::hash("different_password");
+        assert_ne!(hash1, different_hash);
+    }
+
+    #[test]
+    fn test_verify_hash() {
+        let input = "test_password";
+        let hash = AuthUtils::hash(input);
+        
+        assert!(AuthUtils::verify_hash(input, &hash));
+        
+        assert!(!AuthUtils::verify_hash("wrong_password", &hash));
+    }
+
+    #[test]
+    fn test_base64_encode() {
+        let input = "Hello, World!";
+        let encoded = AuthUtils::base64_encode(input);
+        
+        assert_eq!(encoded, "SGVsbG8sIFdvcmxkIQ==");
+        
+        // Empty string
+        assert_eq!(AuthUtils::base64_encode(""), "");
+    }
+
+    #[test]
+    fn test_check_2_base64() {
+        let input = "Hello, World!";
+        let expected = "SGVsbG8sIFdvcmxkIQ==";
+        
+        // Should match correct base64
+        assert!(AuthUtils::check_2_base64(input, expected));
+        
+        // Should reject incorrect base64
+        assert!(!AuthUtils::check_2_base64(input, "wrong_base64"));
+        
+        // Should reject different input
+        assert!(!AuthUtils::check_2_base64("Different input", expected));
+    }
+
+    #[test]
+    fn test_generate_token() {
+        let email = "test@example.com";
+        let minutes = 60;
+        
+        let token = AuthUtils::generate_token(email, minutes);
+        
+        assert!(!token.is_empty());
+        
+        // Token should contain 3 parts separated by dots (JWT format)
+        let parts: Vec<&str> = token.split('.').collect();
+        assert_eq!(parts.len(), 3);
+        
+        // Each part should be valid base64url (approximately)
+        for part in parts {
+            assert!(!part.is_empty());
+        }
+    }
+
+    #[test]
+    fn test_verify_token_valid() {
+        let email = "test@example.com";
+        let minutes = 60;
+        
+        let token = AuthUtils::generate_token(email, minutes);
+        
+        // Should verify valid token
+        assert!(AuthUtils::verify_token(&token));
+    }
+
+    #[test]
+    fn test_verify_token_invalid() {
+        // Should reject completely invalid token
+        assert!(!AuthUtils::verify_token("invalid.token.here"));
+        
+        // Should reject empty token
+        assert!(!AuthUtils::verify_token(""));
+        
+        // Should reject malformed token
+        assert!(!AuthUtils::verify_token("not.a.valid.jwt.token"));
+    }
+
+    #[test]
+    fn test_is_token_expired_valid() {
+        let email = "test@example.com";
+        let minutes = 60;
+        
+        let token = AuthUtils::generate_token(email, minutes);
+        
+        assert!(!AuthUtils::is_token_expired(&token));
+    }
+
+    #[test]
+    fn test_is_token_expired_expired() {
+        let email = "test@example.com";
+        let minutes = -1; // Already expired
+        
+        let token = AuthUtils::generate_token(email, minutes);
+        
+        // Expired token should be detected as expired
+        assert!(AuthUtils::is_token_expired(&token));
+    }
+
+    #[test]
+    fn test_is_token_expired_invalid() {
+        // Invalid token should be treated as expired
+        assert!(AuthUtils::is_token_expired("invalid.token.here"));
+        assert!(AuthUtils::is_token_expired(""));
+    }
+
+    #[test]
+    fn test_encrypt_decrypt() {
+        let email = "test@example.com";
+        
+        // Test encryption
+        let encrypted = AuthUtils::encrypt(email).expect("Encryption should succeed");
+        
+        // Encrypted data should not be empty
+        assert!(!encrypted.is_empty());
+        
+        // Encrypted data should be different from original
+        assert_ne!(encrypted, email);
+        
+        // Test decryption
+        let decrypted = AuthUtils::decrypt(&encrypted).expect("Decryption should succeed");
+        
+        // Decrypted data should match original
+        assert_eq!(decrypted, email);
+    }
+
+    #[test]
+    fn test_encrypt_different_outputs() {
+        let email = "test@example.com";
+        
+        // Multiple encryptions of same data should produce different results (due to random nonce)
+        let encrypted1 = AuthUtils::encrypt(email).expect("Encryption should succeed");
+        let encrypted2 = AuthUtils::encrypt(email).expect("Encryption should succeed");
+        
+        assert_ne!(encrypted1, encrypted2);
+        
+        // But both should decrypt to the same original value
+        let decrypted1 = AuthUtils::decrypt(&encrypted1).expect("Decryption should succeed");
+        let decrypted2 = AuthUtils::decrypt(&encrypted2).expect("Decryption should succeed");
+        
+        assert_eq!(decrypted1, email);
+        assert_eq!(decrypted2, email);
+        assert_eq!(decrypted1, decrypted2);
+    }
+
+    #[test]
+    fn test_decrypt_invalid_data() {
+        // Test with invalid base64
+        let result = AuthUtils::decrypt("not_valid_base64!");
+        assert!(result.is_err());
+        
+        // Test with too short data
+        let short_data = base64::engine::general_purpose::STANDARD.encode(&[1, 2, 3]);
+        let result = AuthUtils::decrypt(&short_data);
+        assert!(result.is_err());
+        
+        // Test with corrupted data
+        let corrupted = base64::engine::general_purpose::STANDARD.encode(&[0u8; 50]);
+        let result = AuthUtils::decrypt(&corrupted);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_encrypt_empty_string() {
+        let empty = "";
+        
+        let encrypted = AuthUtils::encrypt(empty).expect("Should encrypt empty string");
+        let decrypted = AuthUtils::decrypt(&encrypted).expect("Should decrypt empty string");
+        
+        assert_eq!(decrypted, empty);
+    }
+
+    #[test]
+    fn test_encrypt_unicode() {
+        let unicode_email = "测试@例子.com";
+        
+        let encrypted = AuthUtils::encrypt(unicode_email).expect("Should encrypt unicode");
+        let decrypted = AuthUtils::decrypt(&encrypted).expect("Should decrypt unicode");
+        
+        assert_eq!(decrypted, unicode_email);
+    }
+
+    #[test]
+    fn test_derive_key_from_string_consistency() {
+        let key_str = "test_key";
+        
+        let key1 = derive_key_from_string(key_str);
+        let key2 = derive_key_from_string(key_str);
+        
+        // Same input should produce same key
+        assert_eq!(key1, key2);
+        
+        // Key should be 32 bytes
+        assert_eq!(key1.len(), 32);
+        
+        // Different input should produce different key
+        let different_key = derive_key_from_string("different_key");
+        assert_ne!(key1, different_key);
+    }
+
+    #[test]
+    fn test_full_auth_workflow() {
+        let email = "integration@test.com";
+        let password = "secure_password_123";
+        
+        // Hash password
+        let password_hash = AuthUtils::hash(password);
+        assert!(AuthUtils::verify_hash(password, &password_hash));
+        
+        // Encrypt email
+        let encrypted_email = AuthUtils::encrypt(email).expect("Encryption should work");
+        let decrypted_email = AuthUtils::decrypt(&encrypted_email).expect("Decryption should work");
+        assert_eq!(decrypted_email, email);
+        
+        // Generate and verify token
+        let token = AuthUtils::generate_token(email, 60);
+        assert!(AuthUtils::verify_token(&token));
+        assert!(!AuthUtils::is_token_expired(&token));
+        
+        // Base64 operations
+        let encoded = AuthUtils::base64_encode(email);
+        assert!(AuthUtils::check_2_base64(email, &encoded));
+    }
+}
