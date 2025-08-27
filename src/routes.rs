@@ -1,7 +1,7 @@
 use actix_web::web;
 
 use crate::utils::jwt::JwtMiddleware;
-use crate::handlers::user_handlers::{create_user, get_all_users, login_user};
+use crate::api::handlers::user_handlers::{create_user, login_user, get_all_users};
 
 pub fn public_routes(cfg: &mut web::ServiceConfig) {
     cfg.service(

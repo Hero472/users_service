@@ -34,7 +34,7 @@ pub struct UserRegisterReceive {
     pub role: UserRole, // The frontend tells us what role to create
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct UserLoginReceive {
     pub email: String,
     pub password: String,

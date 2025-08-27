@@ -7,6 +7,8 @@ use serde::{Deserialize, Serialize};
 // use jsonwebtoken::{encode, errors::Result as JwtResult, EncodingKey, Header};
 use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
 
+use crate::utils::config::AppConfig;
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Claims {
     pub sub: String,
@@ -52,18 +54,18 @@ where
 
     fn call(&self, req: ServiceRequest) -> Self::Future {
         let service: Rc<S> = Rc::clone(&self.service);
+        let config = AppConfig::global();
         
         if let Some(auth_header) = req.headers().get("Authorization") {
             if let Ok(auth_str) = auth_header.to_str() {
                 if auth_str.starts_with("Bearer ") {
                     let token: &str = &auth_str[7..];
                     
-                    let secret_key: &str = "your_secret_key";
                     let validation: Validation = Validation::new(Algorithm::HS256);
 
                     let token_data: Result<jsonwebtoken::TokenData<Claims>, jsonwebtoken::errors::Error> = decode::<Claims>(
                         token,
-                        &DecodingKey::from_secret(secret_key.as_ref()),
+                        &DecodingKey::from_secret(config.secret_key.as_ref()),
                         &validation,
                     );
 

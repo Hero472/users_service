@@ -5,11 +5,7 @@ use base64::Engine;
 use aes_gcm::{aead::{Aead, OsRng}, AeadCore, Aes256Gcm, KeyInit, Nonce};
 use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
 use chrono::{Utc, Duration};
-use crate::utils::jwt::Claims;
-
-const SECRET_KEY: &str = "your_secret_key";
-
-const KEY: &str = "another_key";
+use crate::utils::{config::AppConfig, jwt::Claims};
 
 fn derive_key_from_string(key_str: &str) -> [u8; 32] {
     let hasher = Sha256::new_with_prefix(key_str.as_bytes());
@@ -42,6 +38,9 @@ impl AuthUtils {
     }
 
     pub fn generate_token(email: &str, minutes: i64) -> String {
+
+        let config = AppConfig::global();
+
         let expiration = Utc::now()
             .checked_add_signed(Duration::minutes(minutes))
             .expect("valid timestamp")
@@ -55,25 +54,29 @@ impl AuthUtils {
         encode(
             &Header::default(),
             &claims,
-            &EncodingKey::from_secret(SECRET_KEY.as_ref()),
+            &EncodingKey::from_secret(config.secret_key.as_ref()),
         ).unwrap()
     }
 
     pub fn verify_token(token: &str) -> bool {
+        let config = AppConfig::global();
+
         let validation = Validation::default();
         let result = decode::<Claims>(
             token,
-            &DecodingKey::from_secret(SECRET_KEY.as_ref()),
+            &DecodingKey::from_secret(config.secret_key.as_ref()),
             &validation,
         );
         result.is_ok()
     }
 
     pub fn is_token_expired(token: &str) -> bool {
+        let config = AppConfig::global();
+
         let validation = Validation::default();
         if let Ok(data) = decode::<Claims>(
             token,
-            &DecodingKey::from_secret(SECRET_KEY.as_ref()),
+            &DecodingKey::from_secret(config.secret_key.as_ref()),
             &validation,
         ) {
             let now = Utc::now().timestamp() as usize;
@@ -85,7 +88,9 @@ impl AuthUtils {
 
     pub fn encrypt(email: &str) -> Result<String, Box<dyn Error>> {
         
-        let key_bytes = derive_key_from_string(KEY);
+        let config = AppConfig::global();
+
+        let key_bytes = derive_key_from_string(&config.encryption_key);
         let key = GenericArray::from_slice(&key_bytes);
         let cipher = Aes256Gcm::new(key);
 
@@ -103,7 +108,9 @@ impl AuthUtils {
 
     pub fn decrypt(encrypted_email: &str) -> Result<String, Box<dyn Error>> {
 
-        let key_bytes = derive_key_from_string(KEY);
+        let config = AppConfig::global();
+
+        let key_bytes = derive_key_from_string(&config.encryption_key);
         let key = GenericArray::from_slice(&key_bytes);
         let cipher = Aes256Gcm::new(key);
 

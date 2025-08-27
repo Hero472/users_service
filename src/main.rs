@@ -1,32 +1,26 @@
-use pets::{api::state::AppState, infrastructure::{database::mongo_context::MongoContext, smtp::email_service::SmtpEmailService}, routes::{private_routes, public_routes}};
+use pets::{api::state::AppState, infrastructure::{database::mongo_context::MongoContext, smtp::email_service::SmtpEmailService}, routes::{private_routes, public_routes}, utils::config::AppConfig};
 use actix_web::{get, web, App, HttpServer, Responder};
-use std::env;
+
 
 #[get("/")]
 async fn entry_point() -> impl Responder {
-    "This is the Pets API. Use the /register endpoint to create an owner."
+    "This is the Users API. Use the /register endpoint to create an user."
 }
 
-// TODO: I need to make a revovery of the account sending an email with a link to reset the password
+// TODO: I need to make a recovery of the account sending an email with a link to reset the password
 
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
 
-
-    dotenv::dotenv().ok();
-
-    // TODO: confirm create account to confirm the email exists
+    let config = AppConfig::global();
 
     let email_service = SmtpEmailService::new(
-        &env::var("SMTP_SERVER").expect("SMTP_SERVER must be set"),
-        &env::var("SMTP_USERNAME").expect("SMTP_USERNAME must be set"),
-        &env::var("SMTP_PASSWORD").expect("SMTP_PASSWORD must be set"),
+        &config.smtp_server,
+        &config.smtp_username,
+        &config.smtp_password
     ).expect("Failed to create EmailService");
 
-    let db_url = env::var("DATABASE_URL")
-        .expect("DATABASE_URL must be set");
-
-    let mongo_context = match MongoContext::init(&db_url, "pets_db").await {
+    let mongo_context = match MongoContext::init(&config.database_url, "users").await {
         Ok(repo) => {
             println!("Connected to MongoDB successfully.");
             repo
@@ -45,8 +39,6 @@ async fn main() -> std::io::Result<()> {
     let app_state = AppState {db: mongo_data, smtp: email_data };
 
     HttpServer::new(move || {
-        println!("Creating new app instance");
-
         App::new()
             .app_data(app_state.clone())
             .configure(public_routes)
