@@ -1,5 +1,6 @@
 use actix_web::{web, HttpResponse, Responder, ResponseError};
-use crate::{api::state::AppState, domain::user::{model::{User, UserLoginReceive, UserRegisterReceive, UserRole, UserSend}, repository::UserRepository}, infrastructure::mongodb::user_repository::MongoUserRepository, utils::{auth::AuthUtils, errors::ApiError}};
+use chrono::{Duration, Utc};
+use crate::{api::state::AppState, domain::{email::service::EmailService, user::{model::{User, UserLoginReceive, UserRegisterReceive, UserRole, UserSend, VerifyEmail}, repository::UserRepository}}, infrastructure::mongodb::user_repository::MongoUserRepository, utils::{auth::AuthUtils, errors::ApiError}};
 
 pub async fn create_user(
     state: web::Data<AppState>,
@@ -16,20 +17,33 @@ pub async fn create_user(
         Err(_) => return HttpResponse::InternalServerError().json("Phone encryption failed")
     };
 
+    let user_repo = MongoUserRepository::new(&state.db);
+
+    let email_send = state
+        .smtp
+        .send_verification_email(&user.email)
+        .await;
+
+    if email_send.is_err() {
+        HttpResponse::InternalServerError().finish();
+    }
+
     let user = User {
         id: None,
         name: user.name.clone(),
         email: encrypted_email,
+        email_hash: AuthUtils::hash(&user.email),
         password: AuthUtils::hash(&user.password),
         phone_number: encrypted_phone,
         role: UserRole::User,
-        owned_pets: vec![],
         access_token: None,
         refresh_token: None,
-        active: false,
+        email_verified: false,
+        verification_code: Some(email_send.unwrap()),
+        verification_code_expires: Some(Utc::now() + Duration::minutes(30)),
+        password_reset_code: None,
+        password_reset_expires: None,
     };
-
-    let user_repo = MongoUserRepository::new(&state.db);
 
     match user_repo.create_user(user).await {
         Ok(_) => HttpResponse::Created().finish(),
@@ -70,6 +84,42 @@ pub async fn login_user(
         },
         Err(e) => e.error_response()
     }
+}
+
+pub async fn verify_email(
+    state: web::Data<AppState>,
+    credentials: web::Json<VerifyEmail>
+) -> impl Responder {
+    let user_repo = MongoUserRepository::new(&state.db);
+
+    let email = credentials.email.clone();
+    let code = credentials.code.clone();
+
+    match user_repo.verify_email(email, code).await {
+        Ok(_) => HttpResponse::Ok().finish(),
+        Err(e) => e.error_response()
+    }
+}
+
+pub async fn ask_recovery_password(
+    state: web::Data<AppState>,
+    email: String
+) {
+
+}
+
+pub async fn confirm_recovery_password(
+    state: web::Data<AppState>,
+    code: String
+) {
+
+}
+
+pub async fn set_new_password(
+    state: web::Data<AppState>,
+    new_password: String
+){
+
 }
 
 pub async fn get_all_users(

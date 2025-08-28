@@ -1,7 +1,7 @@
 use actix_web::web;
 
 use crate::utils::jwt::JwtMiddleware;
-use crate::api::handlers::user_handlers::{create_user, login_user, get_all_users};
+use crate::api::handlers::user_handlers::{create_user, get_all_users, login_user, verify_email};
 
 pub fn public_routes(cfg: &mut web::ServiceConfig) {
     cfg.service(
@@ -9,6 +9,11 @@ pub fn public_routes(cfg: &mut web::ServiceConfig) {
             .route(web::post().to(create_user))
     );
     
+    cfg.service(
+        web::resource("/verify-email")
+            .route(web::post().to(verify_email))
+    );
+
     cfg.service(
         web::resource("/users")
             .route(web::get().to(get_all_users))

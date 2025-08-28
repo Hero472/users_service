@@ -23,6 +23,9 @@ pub enum ApiError {
     #[error("Invalid data: {0}")]
     InvalidData(String),
 
+    #[error("Not found: {0}")]
+    NotFound(String),
+
     #[error(transparent)]
     MongoError(#[from] MongoError),
 
@@ -54,6 +57,12 @@ impl ResponseError for ApiError {
                     "code": 401
                 }))
             },
+            ApiError::NotFound(message) => {
+                HttpResponse::Unauthorized().json(serde_json::json!({
+                    "error": message,
+                    "code": 404
+                }))
+            }
             ApiError::InternalServerError(message) => {
                 HttpResponse::InternalServerError().json(serde_json::json!({
                     "error": message,

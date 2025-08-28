@@ -6,6 +6,7 @@ use aes_gcm::{aead::{Aead, OsRng}, AeadCore, Aes256Gcm, KeyInit, Nonce};
 use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
 use chrono::{Utc, Duration};
 use crate::utils::{config::AppConfig, jwt::Claims};
+use hex;
 
 fn derive_key_from_string(key_str: &str) -> [u8; 32] {
     let hasher = Sha256::new_with_prefix(key_str.as_bytes());
@@ -17,13 +18,14 @@ pub struct AuthUtils;
 
 impl AuthUtils {
 
-    pub fn hash(input: &str) -> Vec<u8> {
+    pub fn hash(input: &str) -> String {
         let mut hasher = Sha256::new_with_prefix(input.as_bytes());
         hasher.update(input.as_bytes());
-        hasher.finalize().to_vec()
+        let result = hasher.finalize();
+        hex::encode(result)
     }
 
-    pub fn verify_hash(input: &str, expected_hash: &[u8]) -> bool {
+    pub fn verify_hash(input: &str, expected_hash: &str) -> bool {
         let hash = Self::hash(input);
         hash == expected_hash
     }
@@ -86,7 +88,7 @@ impl AuthUtils {
         }
     }
 
-    pub fn encrypt(email: &str) -> Result<String, Box<dyn Error>> {
+    pub fn encrypt(input: &str) -> Result<String, Box<dyn Error>> {
         
         let config = AppConfig::global();
 
@@ -96,7 +98,7 @@ impl AuthUtils {
 
         let nonce = Aes256Gcm::generate_nonce(&mut OsRng);
 
-        let cipher_text = cipher.encrypt(&nonce, email.as_bytes())
+        let cipher_text = cipher.encrypt(&nonce, input.as_bytes())
             .map_err(|e| format!("Encryption failed: {}", e))?;
 
         let mut encrypted_data = nonce.to_vec();
@@ -105,8 +107,7 @@ impl AuthUtils {
         Ok(base64::engine::general_purpose::STANDARD.encode(encrypted_data))
     }
 
-
-    pub fn decrypt(encrypted_email: &str) -> Result<String, Box<dyn Error>> {
+    pub fn decrypt(input: &str) -> Result<String, Box<dyn Error>> {
 
         let config = AppConfig::global();
 
@@ -114,7 +115,7 @@ impl AuthUtils {
         let key = GenericArray::from_slice(&key_bytes);
         let cipher = Aes256Gcm::new(key);
 
-        let encrypted_data = base64::engine::general_purpose::STANDARD.decode(encrypted_email)
+        let encrypted_data = base64::engine::general_purpose::STANDARD.decode(input)
             .map_err(|e| format!("Base64 decode failed: {}", e))?;
 
         if encrypted_data.len() < 12 {
@@ -165,7 +166,7 @@ mod tests {
         assert_eq!(hash1, hash2);
         
         // Hash should be 32 bytes (SHA256)
-        assert_eq!(hash1.len(), 32);
+        assert_eq!(hash1.len(), 64);
         
         let different_hash = AuthUtils::hash("different_password");
         assert_ne!(hash1, different_hash);

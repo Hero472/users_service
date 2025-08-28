@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use chrono::Utc;
 use futures::StreamExt;
 use mongodb::bson::{self, doc};
 use mongodb::bson::oid::ObjectId;
@@ -41,13 +42,12 @@ impl UserRepository for MongoUserRepository {
         Ok(())
     }
 
-    
-    
     async fn login_user(&self, credentials: UserLoginReceive) -> Result<Option<User>, ApiError> {
         let user = self.get_user_by_email(credentials.email).await?;
 
         if let Some(mut user) = user {
-            if AuthUtils::verify_hash(&credentials.password, &user.password) {
+            // all credentials must be okay and also account must be active
+            if AuthUtils::verify_hash(&credentials.password, &user.password) && user.email_verified {
                 // Generate access token and refresh token
                 let email= AuthUtils::decrypt(&user.email)
                     .map_err(|e| ApiError::InternalServerError(e.to_string()))?;
@@ -63,8 +63,6 @@ impl UserRepository for MongoUserRepository {
         Ok(None) // Owner not found
     }
 
-    
-    
     async fn get_all_users(&self) -> Result<Vec<User>, ApiError> {
         let mut cursor = self.users.find(doc! {}).await?;
         let mut users = Vec::new();
@@ -80,7 +78,6 @@ impl UserRepository for MongoUserRepository {
         Ok(users)
     }
 
-
     async fn get_user_by_id(&self, id: ObjectId) -> Result<Option<User>, ApiError> {
 
         match self.users.find_one(doc! { "_id": id }).await {
@@ -88,36 +85,36 @@ impl UserRepository for MongoUserRepository {
             Err(e) => Err(ApiError::MongoError(e))
         }
     }
-
-    
+ 
     async fn get_user_by_email(&self, email: String) -> Result<Option<User>, ApiError> {
 
-        match self.users.find_one(doc! { "email": &email }).await {
+        match self.users.find_one(doc! { "email_hash": &AuthUtils::hash(&email) }).await {
             Ok(user) => Ok(user),
             Err(e) => Err(ApiError::MongoError(e))
         }
     }
 
-    
-    
     async fn update_user(&self, user: User) -> Result<(), ApiError> {
-
-        // TODO: PUT THIS INTO FN
-        let email= AuthUtils::decrypt(&user.email)
-                    .map_err(|e| ApiError::InternalServerError(e.to_string()))?;
         
-        let filter = doc! { "email": email };
+        let filter = doc! { "email_hash": user.email_hash.clone() };
         let update_doc = bson::to_bson(&user)?;
 
         if let bson::Bson::Document(document) = update_doc {
             let update = doc! {"$set": document };
-            self.users.update_one(filter, update).await?;
+            let result = self.users.update_one(filter, update).await?;
+
+            if result.modified_count == 0 {
+                return Err(ApiError::NotFound(format!(
+                    "User with email_hash {} not found or no changes made", 
+                    user.email_hash
+                )));
+            }
+        } else {
+            return Err(ApiError::InvalidData("Failed to convert user to BSON document".to_string()));
         }
         Ok(())
     }
 
-    
-    
     async fn delete_user(&self, email: String) -> Result<(), ApiError> {
         let filter = doc! { "email": &email };
         
@@ -127,13 +124,40 @@ impl UserRepository for MongoUserRepository {
         }
     }
 
-    
-    
+    async fn verify_email(&self, email: String, code: String) -> Result<(), ApiError> {
+        let user = self.get_user_by_email(email).await?;
+
+        let mut user = user.ok_or_else(|| ApiError::NotFound("User not found".to_string()))?;
+
+        if user.email_verified {
+            return Err(ApiError::Conflict("Email already verified".to_string()));
+        }
+
+        let verification_code = user.verification_code.as_ref()
+            .ok_or_else(|| ApiError::BadRequest("No verification code found".to_string()))?;
+
+        let verification_expiry = user.verification_code_expires
+            .ok_or_else(|| ApiError::BadRequest("No verification expiry found".to_string()))?;
+
+        // Verify code and expiry
+        if verification_code != &code {
+            return Err(ApiError::Unauthorized("Invalid verification code".to_string()));
+        }
+
+        if verification_expiry < Utc::now() {
+            return Err(ApiError::Unauthorized("Verification code expired".to_string()));
+        }
+
+        user.email_verified = true;
+        
+        self.update_user(user).await
+
+    }
+
     async fn reset_password(&self, _email: String, _code: String) -> Result<(), ApiError> {
         todo!()
     }
 
-    
     async fn send_password_reset_email(&self, _email: String) -> Result<(), ApiError> {
         todo!()
     }

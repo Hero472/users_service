@@ -40,7 +40,7 @@ async fn main() -> std::io::Result<()> {
 
     HttpServer::new(move || {
         App::new()
-            .app_data(app_state.clone())
+            .app_data(web::Data::new(app_state.clone()))
             .configure(public_routes)
             .configure(private_routes)
             .service(entry_point)
