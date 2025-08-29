@@ -20,6 +20,7 @@ POST /register
 Creates a new user account and sends a verification email.
 
 Request Body:
+```
 {
   "name": "John",
   "last_name": "Doe",
@@ -27,6 +28,7 @@ Request Body:
   "email": "john.doe@example.com",
   "password": "Secur3_password"
 }
+```
 
 Response:
 - 201 Created: User successfully created
@@ -38,12 +40,15 @@ POST /login
 Authenticates a user and returns user information with access token.
 
 Request Body:
+```
 {
   "email": "john.doe@example.com",
   "password": "Secur3_password"
 }
+```
 
 Response:
+```
 {
   "id": "ObjectId",
   "name": "John",
@@ -52,6 +57,7 @@ Response:
   "role": "User",
   "access_token": "jwt_token_here"
 }
+```
 
 ### Email Verification
 POST /verify-email
@@ -59,10 +65,12 @@ POST /verify-email
 Verifies user email with the code sent during registration.
 
 Request Body:
+```
 {
   "email": "john.doe@example.com",
   "code": "verification_code"
 }
+```
 
 ### Password Recovery - Request Reset
 POST /forgot-password
@@ -70,9 +78,11 @@ POST /forgot-password
 Initiates password recovery by sending a reset code via email.
 
 Request Body:
+```
 {
   "email": "john.doe@example.com"
 }
+```
 
 ### Password Recovery - Verify Code
 POST /verify-reset-code
@@ -80,10 +90,12 @@ POST /verify-reset-code
 Verifies the password reset code sent via email.
 
 Request Body:
+```
 {
   "email": "john.doe@example.com",
   "code": "reset_code"
 }
+```
 
 ### Password Recovery - Set New Password
 POST /reset-password
@@ -91,12 +103,14 @@ POST /reset-password
 Sets a new password after code verification.
 
 Request Body:
+```
 {
   "email": "john.doe@example.com",
   "code": "reset_code",
   "new_password": "new_secure_password",
   "confirm_pass": "new_secure_password"
 }
+```
 
 ## Data Models
 
@@ -118,10 +132,12 @@ The main user model stored in the database:
 - password_reset_expires: Reset code expiration
 
 ### UserRole
+```
 pub enum UserRole {
     Admin,
     User
 }
+```
 
 ## Security Features
 
@@ -145,6 +161,7 @@ pub enum UserRole {
 
 Based on the code structure, this system likely uses:
 - actix-web: Web framework for HTTP handling
+- tokio: Asynchronous runtime for Rust
 - MongoDB: Database for user data persistence
 - serde: Serialization/deserialization
 - chrono: Date and time handling
@@ -159,7 +176,7 @@ Based on the code structure, this system likely uses:
 4. Dependencies: Install required Rust crates
 
 ## Usage Example
-
+```
 use actix_web::{web, App, HttpServer};
 
 #[actix_web::main]
@@ -177,6 +194,7 @@ async fn main() -> std::io::Result<()> {
     .run()
     .await
 }
+```
 
 ## Error Handling
 
@@ -206,4 +224,4 @@ When contributing to this authentication system:
 
 ## License
 
-[Add your license information here]
+MIT
