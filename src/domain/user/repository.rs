@@ -3,7 +3,7 @@ use crate::{domain::user::model::{CodeRequest, EmailRequest, PasswordResetReques
 
 #[async_trait]
 pub trait UserRepository: Send + Sync {
-    async fn create_user(&self, user: User) -> Result<(), ApiError>;
+    async fn create_user(&self, user: User, password: &str) -> Result<(), ApiError>;
     async fn login_user(&self, credentials: UserLoginReceive) -> Result<Option<User>, ApiError>;
     async fn get_all_users(&self) -> Result<Vec<User>, ApiError>; // not used
     async fn get_user_by_email(&self, email: String) -> Result<Option<User>, ApiError>;

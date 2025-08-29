@@ -8,6 +8,7 @@
     "Luma",
     "Pkcs",
     "qrcode",
+    "Secur",
     "serde",
     "thiserror"
   ]

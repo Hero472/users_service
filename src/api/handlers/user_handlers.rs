@@ -28,6 +28,8 @@ pub async fn create_user(
         HttpResponse::InternalServerError().finish();
     }
 
+    let password = &user.password;
+
     let user = User {
         id: None,
         name: user.name.clone(),
@@ -45,7 +47,7 @@ pub async fn create_user(
         password_reset_expires: None,
     };
 
-    match user_repo.create_user(user).await {
+    match user_repo.create_user(user, password).await {
         Ok(_) => HttpResponse::Created().finish(),
         Err(e) => e.error_response()
     }

@@ -2,7 +2,6 @@ use async_trait::async_trait;
 use chrono::Utc;
 use futures::StreamExt;
 use mongodb::bson::{self, doc};
-use mongodb::bson::oid::ObjectId;
 
 use crate::infrastructure::database::mongo_context::MongoContext;
 use crate::domain::user::repository::UserRepository;
@@ -25,9 +24,8 @@ impl MongoUserRepository {
 #[async_trait]
 impl UserRepository for MongoUserRepository {
     
-    async fn create_user(&self, user: User) -> Result<(), ApiError> {
-
-        self.validate_password_strength(&user.password)?;
+    async fn create_user(&self, user: User, password: &str) -> Result<(), ApiError> {
+        self.validate_password_strength(&password)?;
 
         if user.email.is_empty() {
             return Err(ApiError::InvalidData("Email cannot be empty".to_string()));
@@ -35,7 +33,6 @@ impl UserRepository for MongoUserRepository {
 
         let email= AuthUtils::decrypt(&user.email)
             .map_err(|e| ApiError::InternalServerError(e.to_string()))?;
-
 
         if let Some(_) = self.get_user_by_email(email).await? {
             return Err(ApiError::InvalidData("user with this email already exists".to_string()));
@@ -193,6 +190,8 @@ impl UserRepository for MongoUserRepository {
     }
 
     async fn change_password(&self, request: PasswordResetRequest) -> Result<(), ApiError> {
+
+        self.validate_password_strength(&request.new_password)?;
 
         self.verify_password_code(CodeRequest {
             email: request.email.clone(),
