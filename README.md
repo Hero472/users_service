@@ -224,4 +224,4 @@ When contributing to this authentication system:
 
 ## License
 
-MIT
+All rights reserved
