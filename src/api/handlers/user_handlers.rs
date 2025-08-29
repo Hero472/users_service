@@ -1,6 +1,6 @@
 use actix_web::{web, HttpResponse, Responder, ResponseError};
 use chrono::{Duration, Utc};
-use crate::{api::state::AppState, domain::{email::service::EmailService, user::{model::{User, UserLoginReceive, UserRegisterReceive, UserRole, UserSend, VerifyEmail}, repository::UserRepository}}, infrastructure::mongodb::user_repository::MongoUserRepository, utils::{auth::AuthUtils, errors::ApiError}};
+use crate::{api::state::AppState, domain::{email::service::EmailService, user::{model::{CodeRequest, EmailRequest, PasswordResetRequest, User, UserLoginReceive, UserRegisterReceive, UserRole, UserSend, VerifyEmail}, repository::UserRepository}}, infrastructure::mongodb::user_repository::MongoUserRepository, utils::{auth::AuthUtils, errors::ApiError}};
 
 pub async fn create_user(
     state: web::Data<AppState>,
@@ -72,7 +72,7 @@ pub async fn login_user(
                     id: user.id,
                     name: user.name,
                     phone_number: phone_number,
-                    email: user.email,
+                    email: AuthUtils::decrypt(&user.email).unwrap(),
                     role: user.role,
                     access_token: user.access_token,
                 };
@@ -103,23 +103,45 @@ pub async fn verify_email(
 
 pub async fn ask_recovery_password(
     state: web::Data<AppState>,
-    email: String
-) {
+    request: web::Json<EmailRequest>
+) -> impl Responder {
 
+    let user_repo = MongoUserRepository::new(&state.db);
+
+    match state.smtp.send_password_reset_email(&request.email).await {
+        Ok(code) => {
+            match user_repo.reset_password_code_save(request.email.to_string(), code).await {
+                Ok(_) => HttpResponse::Ok().finish(),
+                Err(e) => e.error_response()
+            }
+        },
+        Err(e) => e.error_response()
+    }
+    
 }
 
 pub async fn confirm_recovery_password(
     state: web::Data<AppState>,
-    code: String
-) {
-
+    request: web::Json<CodeRequest>
+) -> impl Responder {
+   let user_repo = MongoUserRepository::new(&state.db);
+   
+    match user_repo.verify_password_code(request.email.clone(), request.code.clone()).await {
+        Ok(value) => HttpResponse::Ok().json(value),
+        Err(e) => e.error_response()
+    }
 }
 
 pub async fn set_new_password(
     state: web::Data<AppState>,
-    new_password: String
-){
+    request: web::Json<PasswordResetRequest>
+) -> impl Responder {
+    let user_repo = MongoUserRepository::new(&state.db);
 
+    match user_repo.change_password(request.email.clone(), request.code.clone(), request.new_password.clone(), request.confirm_pass.clone()).await {
+        Ok(value) => HttpResponse::Ok().json(value),
+        Err(e) => e.error_response()
+    }
 }
 
 pub async fn get_all_users(

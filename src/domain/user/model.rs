@@ -62,3 +62,22 @@ pub struct VerifyEmail {
     pub email: String,
     pub code: String
 }
+
+#[derive(Deserialize)]
+pub struct EmailRequest {
+    pub email: String,
+}
+
+#[derive(Deserialize)]
+pub struct CodeRequest {
+    pub email: String,
+    pub code: String,
+}
+
+#[derive(Deserialize)]
+pub struct PasswordResetRequest {
+    pub email: String,
+    pub code: String,
+    pub new_password: String,
+    pub confirm_pass: String
+}

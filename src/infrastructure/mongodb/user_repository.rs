@@ -1,6 +1,7 @@
 use async_trait::async_trait;
 use chrono::Utc;
 use futures::StreamExt;
+use lettre::transport::smtp::commands::Auth;
 use mongodb::bson::{self, doc};
 use mongodb::bson::oid::ObjectId;
 
@@ -24,7 +25,6 @@ impl MongoUserRepository {
 
 #[async_trait]
 impl UserRepository for MongoUserRepository {
-    
     
     async fn create_user(&self, user: User) -> Result<(), ApiError> {
         if user.email.is_empty() {
@@ -154,11 +154,54 @@ impl UserRepository for MongoUserRepository {
 
     }
 
-    async fn reset_password(&self, _email: String, _code: String) -> Result<(), ApiError> {
-        todo!()
+    async fn reset_password_code_save(&self, email: String, code: String) -> Result<(), ApiError> {
+        
+        let expires_at = chrono::Utc::now() + chrono::Duration::minutes(15);
+
+        let mut user = self
+            .get_user_by_email(email)
+            .await?
+            .ok_or_else(|| ApiError::NotFound("User not found".to_string()))?;
+
+
+        if !user.email_verified {
+            return Err(ApiError::Conflict("Email is not verified".to_string()));
+        }
+
+        user.password_reset_code = Some(code);
+        user.password_reset_expires = Some(expires_at);
+
+        self.update_user(user).await
+      
+    }
+    
+    async fn verify_password_code(&self, email: String, code: String) -> Result<bool, ApiError> {
+        let user = self
+            .get_user_by_email(email)
+            .await?
+            .ok_or_else(|| ApiError::NotFound("User not found".to_string()))?;
+
+        if user.password_reset_code == Some(code) && user.password_reset_expires > Some(Utc::now()) {
+            return Ok(true)
+        } else {
+            Ok(false)
+        }
+
     }
 
-    async fn send_password_reset_email(&self, _email: String) -> Result<(), ApiError> {
-        todo!()
+    async fn change_password(&self, email: String, code: String, password: String, confirm_pass: String) -> Result<bool, ApiError> {
+
+        let mut user = self
+                    .get_user_by_email(email)
+                    .await?
+                    .ok_or_else(|| ApiError::NotFound("User not found".to_string()))?;
+
+        if password == confirm_pass && user.password_reset_code == Some(code) {
+            user.password = AuthUtils::hash(&password);
+            let _ = self.update_user(user).await;
+            Ok(true)
+        } else {
+            Ok(false)
+        }
     }
 }

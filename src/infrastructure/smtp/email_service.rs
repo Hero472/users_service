@@ -44,33 +44,6 @@ impl SmtpEmailService {
         self.mailer.send(message).await?;
         Ok(())
     }
-
-    // TODO: I need to implement a storing system for this recovery code
-    pub async fn send_password_recovery(&self, to: &str) -> Result<String, Box<dyn Error>> {
-
-        let recovery_code = rand::rng().random_range(100000..999999).to_string();
-
-        let email = Email {
-            to: to.to_string(),
-            subject: "Pets App Password Recovery".to_string(),
-            html_body: format!(
-                "<p>Hello,</p><p>Your password recovery code is: <strong>{}</strong></p>\
-                 <p>If you did not request this, please ignore.</p>",
-                recovery_code
-            ),
-            text_body: format!(
-                "Hello,\n\nYour password recovery code is:\n\n{}\n\n\
-                Please enter this code in the app to reset your password.\n\
-                If you did not request a password reset, please ignore this email.\n\n\
-                Best regards,\nPets App Team",
-                recovery_code
-            ),
-        };
-
-        self.send_email_internal(&email).await?;
-
-        Ok(recovery_code)
-    }
 }
 
 #[async_trait]
