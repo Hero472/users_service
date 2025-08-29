@@ -1,13 +1,12 @@
 use async_trait::async_trait;
 use chrono::Utc;
 use futures::StreamExt;
-use lettre::transport::smtp::commands::Auth;
 use mongodb::bson::{self, doc};
 use mongodb::bson::oid::ObjectId;
 
 use crate::infrastructure::database::mongo_context::MongoContext;
 use crate::domain::user::repository::UserRepository;
-use crate::domain::user::model::{User, UserLoginReceive};
+use crate::domain::user::model::{CodeRequest, EmailRequest, PasswordResetRequest, User, UserLoginReceive};
 use crate::utils::auth::AuthUtils;
 use crate::utils::errors::ApiError;
 
@@ -27,6 +26,9 @@ impl MongoUserRepository {
 impl UserRepository for MongoUserRepository {
     
     async fn create_user(&self, user: User) -> Result<(), ApiError> {
+
+        self.validate_password_strength(&user.password)?;
+
         if user.email.is_empty() {
             return Err(ApiError::InvalidData("Email cannot be empty".to_string()));
         }
@@ -76,14 +78,6 @@ impl UserRepository for MongoUserRepository {
             }
         }
         Ok(users)
-    }
-
-    async fn get_user_by_id(&self, id: ObjectId) -> Result<Option<User>, ApiError> {
-
-        match self.users.find_one(doc! { "_id": id }).await {
-            Ok(user) => Ok(user),
-            Err(e) => Err(ApiError::MongoError(e))
-        }
     }
  
     async fn get_user_by_email(&self, email: String) -> Result<Option<User>, ApiError> {
@@ -154,18 +148,18 @@ impl UserRepository for MongoUserRepository {
 
     }
 
-    async fn reset_password_code_save(&self, email: String, code: String) -> Result<(), ApiError> {
+    async fn reset_password_code_save(&self, request: EmailRequest, code: String) -> Result<(), ApiError> {
         
         let expires_at = chrono::Utc::now() + chrono::Duration::minutes(15);
 
         let mut user = self
-            .get_user_by_email(email)
+            .get_user_by_email(request.email)
             .await?
             .ok_or_else(|| ApiError::NotFound("User not found".to_string()))?;
 
 
         if !user.email_verified {
-            return Err(ApiError::Conflict("Email is not verified".to_string()));
+            return Err(ApiError::Conflict("Email must be verified before password reset".to_string()));
         }
 
         user.password_reset_code = Some(code);
@@ -175,33 +169,90 @@ impl UserRepository for MongoUserRepository {
       
     }
     
-    async fn verify_password_code(&self, email: String, code: String) -> Result<bool, ApiError> {
+    async fn verify_password_code(&self, request: CodeRequest) -> Result<(), ApiError> {
         let user = self
-            .get_user_by_email(email)
+            .get_user_by_email(request.email)
             .await?
             .ok_or_else(|| ApiError::NotFound("User not found".to_string()))?;
 
-        if user.password_reset_code == Some(code) && user.password_reset_expires > Some(Utc::now()) {
-            return Ok(true)
-        } else {
-            Ok(false)
+        let stored_code = user.password_reset_code
+            .ok_or_else(|| ApiError::BadRequest("No reset code found".to_string()))?;
+        
+        let expiry = user.password_reset_expires
+            .ok_or_else(|| ApiError::BadRequest("Reset code has no expiry".to_string()))?;
+        
+        if expiry < Utc::now() {
+            return Err(ApiError::Unauthorized("Reset code has expired".to_string()));
         }
 
+        if stored_code != request.code {
+            return Err(ApiError::Unauthorized("Invalid reset code".to_string()));
+        }
+
+        Ok(())
     }
 
-    async fn change_password(&self, email: String, code: String, password: String, confirm_pass: String) -> Result<bool, ApiError> {
+    async fn change_password(&self, request: PasswordResetRequest) -> Result<(), ApiError> {
+
+        self.verify_password_code(CodeRequest {
+            email: request.email.clone(),
+            code: request.code.clone(),
+        }).await?;
+
+        if request.new_password != request.confirm_pass {
+            return Err(ApiError::BadRequest("Passwords do not match".to_string()));
+        }
+
+        // Check password strength
+        if request.new_password.len() < 8 {
+            return Err(ApiError::BadRequest("Password must be at least 8 characters".to_string()));
+        }
 
         let mut user = self
-                    .get_user_by_email(email)
-                    .await?
-                    .ok_or_else(|| ApiError::NotFound("User not found".to_string()))?;
+            .get_user_by_email(request.email)
+            .await?
+            .ok_or_else(|| ApiError::NotFound("User not found".to_string()))?;
 
-        if password == confirm_pass && user.password_reset_code == Some(code) {
-            user.password = AuthUtils::hash(&password);
-            let _ = self.update_user(user).await;
-            Ok(true)
-        } else {
-            Ok(false)
-        }
+        user.password = AuthUtils::hash(&request.new_password);
+        user.password_reset_code = None;
+        user.password_reset_expires = None;
+
+        self.update_user(user).await?;
+        
+        Ok(())
     }
+
+    fn validate_password_strength(&self, password: &str) -> Result<(), ApiError> {
+        if password.len() < 8 {
+            return Err(ApiError::InvalidData("Password must be at least 8 characters long".to_string()));
+        }
+
+        let has_uppercase = password.chars().any(|c| c.is_ascii_uppercase());
+        let has_lowercase = password.chars().any(|c| c.is_ascii_lowercase());
+        let has_digit = password.chars().any(|c| c.is_ascii_digit());
+        let has_special = password.chars().any(|c| !c.is_ascii_alphanumeric());
+
+        let mut error_messages = Vec::new();
+
+        if !has_uppercase {
+            error_messages.push("at least one uppercase letter");
+        }
+        if !has_lowercase {
+            error_messages.push("at least one lowercase letter");
+        }
+        if !has_digit {
+            error_messages.push("at least one digit");
+        }
+        if !has_special {
+            error_messages.push("at least one special character");
+        }
+
+        if !error_messages.is_empty() {
+            let error_msg = format!("Password must contain: {}", error_messages.join(", "));
+            return Err(ApiError::InvalidData(error_msg));
+        }
+
+        Ok(())
+    }
+
 }

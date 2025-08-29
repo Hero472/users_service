@@ -110,7 +110,7 @@ pub async fn ask_recovery_password(
 
     match state.smtp.send_password_reset_email(&request.email).await {
         Ok(code) => {
-            match user_repo.reset_password_code_save(request.email.to_string(), code).await {
+            match user_repo.reset_password_code_save(request.into_inner(), code).await {
                 Ok(_) => HttpResponse::Ok().finish(),
                 Err(e) => e.error_response()
             }
@@ -126,8 +126,8 @@ pub async fn confirm_recovery_password(
 ) -> impl Responder {
    let user_repo = MongoUserRepository::new(&state.db);
    
-    match user_repo.verify_password_code(request.email.clone(), request.code.clone()).await {
-        Ok(value) => HttpResponse::Ok().json(value),
+    match user_repo.verify_password_code(request.into_inner()).await {
+        Ok(_) => HttpResponse::Ok().finish(),
         Err(e) => e.error_response()
     }
 }
@@ -138,20 +138,8 @@ pub async fn set_new_password(
 ) -> impl Responder {
     let user_repo = MongoUserRepository::new(&state.db);
 
-    match user_repo.change_password(request.email.clone(), request.code.clone(), request.new_password.clone(), request.confirm_pass.clone()).await {
-        Ok(value) => HttpResponse::Ok().json(value),
-        Err(e) => e.error_response()
-    }
-}
-
-pub async fn get_all_users(
-    state: web::Data<AppState>
-) -> impl Responder {
-
-    let user_repo = MongoUserRepository::new(&state.db);
-
-    match user_repo.get_all_users().await {
-        Ok(users) => HttpResponse::Ok().json(users),
+    match user_repo.change_password(request.into_inner()).await {
+        Ok(_) => HttpResponse::Ok().finish(),
         Err(e) => e.error_response()
     }
 }
