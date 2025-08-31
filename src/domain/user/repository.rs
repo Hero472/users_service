@@ -14,4 +14,5 @@ pub trait UserRepository: Send + Sync {
     async fn verify_password_code(&self, request: CodeRequest) -> Result<(), ApiError>;
     async fn change_password(&self, request: PasswordResetRequest) -> Result<(), ApiError>;
     fn validate_password_strength(&self, password: &str) -> Result<(), ApiError>;
+    fn validate_email(&self, email: &str) -> Result<(), ApiError>;
 }

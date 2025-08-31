@@ -3,13 +3,21 @@
     "bson",
     "chrono",
     "creds",
+    "fakeinbox",
+    "Fdvcmxk",
+    "guerrillamail",
     "jsonwebtoken",
     "lettre",
     "Luma",
+    "mailinator",
+    "minutemail",
     "Pkcs",
     "qrcode",
     "Secur",
     "serde",
-    "thiserror"
+    "tempmail",
+    "thiserror",
+    "trashmail",
+    "yopmail"
   ]
 }

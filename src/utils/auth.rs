@@ -6,7 +6,7 @@ use aes_gcm::{aead::{Aead, OsRng}, AeadCore, Aes256Gcm, KeyInit, Nonce};
 use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
 use chrono::{Utc, Duration};
 use crate::utils::{config::AppConfig, jwt::Claims};
-use hex;
+use bcrypt::{hash as crypt_hash, DEFAULT_COST};
 
 fn derive_key_from_string(key_str: &str) -> [u8; 32] {
     let hasher = Sha256::new_with_prefix(key_str.as_bytes());
@@ -18,25 +18,12 @@ pub struct AuthUtils;
 
 impl AuthUtils {
 
-    pub fn hash(input: &str) -> String {
-        let mut hasher = Sha256::new_with_prefix(input.as_bytes());
-        hasher.update(input.as_bytes());
-        let result = hasher.finalize();
-        hex::encode(result)
+    pub fn hash(input: &str) -> Result<String, bcrypt::BcryptError> {
+        crypt_hash(input, DEFAULT_COST)
     }
 
-    pub fn verify_hash(input: &str, expected_hash: &str) -> bool {
-        let hash = Self::hash(input);
-        hash == expected_hash
-    }
-
-    pub fn base64_encode(input: &str) -> String {
-        base64::engine::general_purpose::STANDARD.encode(input)
-    }
-
-    pub fn check_2_base64(input: &str, expected: &str) -> bool {
-        let encoded_input = Self::base64_encode(input);
-        encoded_input == expected
+    pub fn verify_hash(password: &str, hash: &str) -> Result<bool, bcrypt::BcryptError> {
+        bcrypt::verify(password, hash)
     }
 
     pub fn generate_token(email: &str, minutes: i64) -> String {
@@ -160,52 +147,26 @@ mod tests {
     #[test]
     fn test_hash() {
         let input = "test_password";
-        let hash1 = AuthUtils::hash(input);
-        let hash2 = AuthUtils::hash(input);
+        let hash1 = AuthUtils::hash(input).unwrap();
+        let hash2 = AuthUtils::hash(input).unwrap();
         
         assert_eq!(hash1, hash2);
         
         // Hash should be 32 bytes (SHA256)
         assert_eq!(hash1.len(), 64);
         
-        let different_hash = AuthUtils::hash("different_password");
+        let different_hash = AuthUtils::hash("different_password").unwrap();
         assert_ne!(hash1, different_hash);
     }
 
     #[test]
     fn test_verify_hash() {
         let input = "test_password";
-        let hash = AuthUtils::hash(input);
+        let hash = AuthUtils::hash(input).unwrap();
         
-        assert!(AuthUtils::verify_hash(input, &hash));
+        assert!(AuthUtils::verify_hash(input, &hash).unwrap());
         
-        assert!(!AuthUtils::verify_hash("wrong_password", &hash));
-    }
-
-    #[test]
-    fn test_base64_encode() {
-        let input = "Hello, World!";
-        let encoded = AuthUtils::base64_encode(input);
-        
-        assert_eq!(encoded, "SGVsbG8sIFdvcmxkIQ==");
-        
-        // Empty string
-        assert_eq!(AuthUtils::base64_encode(""), "");
-    }
-
-    #[test]
-    fn test_check_2_base64() {
-        let input = "Hello, World!";
-        let expected = "SGVsbG8sIFdvcmxkIQ==";
-        
-        // Should match correct base64
-        assert!(AuthUtils::check_2_base64(input, expected));
-        
-        // Should reject incorrect base64
-        assert!(!AuthUtils::check_2_base64(input, "wrong_base64"));
-        
-        // Should reject different input
-        assert!(!AuthUtils::check_2_base64("Different input", expected));
+        assert!(!AuthUtils::verify_hash("wrong_password", &hash).unwrap());
     }
 
     #[test]
@@ -378,8 +339,8 @@ mod tests {
         let password = "secure_password_123";
         
         // Hash password
-        let password_hash = AuthUtils::hash(password);
-        assert!(AuthUtils::verify_hash(password, &password_hash));
+        let password_hash = AuthUtils::hash(password).unwrap();
+        assert!(AuthUtils::verify_hash(password, &password_hash).unwrap());
         
         // Encrypt email
         let encrypted_email = AuthUtils::encrypt(email).expect("Encryption should work");
@@ -390,9 +351,5 @@ mod tests {
         let token = AuthUtils::generate_token(email, 60);
         assert!(AuthUtils::verify_token(&token));
         assert!(!AuthUtils::is_token_expired(&token));
-        
-        // Base64 operations
-        let encoded = AuthUtils::base64_encode(email);
-        assert!(AuthUtils::check_2_base64(email, &encoded));
     }
 }

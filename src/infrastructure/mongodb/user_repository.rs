@@ -27,9 +27,7 @@ impl UserRepository for MongoUserRepository {
     async fn create_user(&self, user: User, password: &str) -> Result<(), ApiError> {
         self.validate_password_strength(&password)?;
 
-        if user.email.is_empty() {
-            return Err(ApiError::InvalidData("Email cannot be empty".to_string()));
-        }
+        self.validate_email(&user.email)?;
 
         let email= AuthUtils::decrypt(&user.email)
             .map_err(|e| ApiError::InternalServerError(e.to_string()))?;
@@ -46,7 +44,11 @@ impl UserRepository for MongoUserRepository {
 
         if let Some(mut user) = user {
             // all credentials must be okay and also account must be active
-            if AuthUtils::verify_hash(&credentials.password, &user.password) && user.email_verified {
+
+            let pass = AuthUtils::verify_hash(&credentials.password, &user.password)
+                .map_err(|e| ApiError::InternalServerError(e.to_string()))?;
+
+            if pass && user.email_verified {
                 // Generate access token and refresh token
                 let email= AuthUtils::decrypt(&user.email)
                     .map_err(|e| ApiError::InternalServerError(e.to_string()))?;
@@ -79,7 +81,10 @@ impl UserRepository for MongoUserRepository {
  
     async fn get_user_by_email(&self, email: String) -> Result<Option<User>, ApiError> {
 
-        match self.users.find_one(doc! { "email_hash": &AuthUtils::hash(&email) }).await {
+        let email_hash = AuthUtils::hash(&email)
+            .map_err(|e| ApiError::InternalServerError(e.to_string()))?;
+
+        match self.users.find_one(doc! { "email_hash": email_hash }).await {
             Ok(user) => Ok(user),
             Err(e) => Err(ApiError::MongoError(e))
         }
@@ -131,6 +136,9 @@ impl UserRepository for MongoUserRepository {
             .ok_or_else(|| ApiError::BadRequest("No verification expiry found".to_string()))?;
 
         // Verify code and expiry
+        let code = AuthUtils::hash(&code)
+            .map_err(|e| ApiError::InternalServerError(e.to_string()))?;
+
         if verification_code != &code {
             return Err(ApiError::Unauthorized("Invalid verification code".to_string()));
         }
@@ -159,6 +167,9 @@ impl UserRepository for MongoUserRepository {
             return Err(ApiError::Conflict("Email must be verified before password reset".to_string()));
         }
 
+        let code = AuthUtils::hash(&code)
+            .map_err(|e| ApiError::InternalServerError(e.to_string()))?;
+
         user.password_reset_code = Some(code);
         user.password_reset_expires = Some(expires_at);
 
@@ -182,7 +193,10 @@ impl UserRepository for MongoUserRepository {
             return Err(ApiError::Unauthorized("Reset code has expired".to_string()));
         }
 
-        if stored_code != request.code {
+        let request_code = AuthUtils::hash(&request.code)
+            .map_err(|e| ApiError::InternalServerError(e.to_string()))?;
+
+        if stored_code != request_code {
             return Err(ApiError::Unauthorized("Invalid reset code".to_string()));
         }
 
@@ -212,7 +226,10 @@ impl UserRepository for MongoUserRepository {
             .await?
             .ok_or_else(|| ApiError::NotFound("User not found".to_string()))?;
 
-        user.password = AuthUtils::hash(&request.new_password);
+        let new_password = AuthUtils::hash(&request.new_password)
+            .map_err(|e| ApiError::InternalServerError(e.to_string()))?;
+
+        user.password = new_password;
         user.password_reset_code = None;
         user.password_reset_expires = None;
 
@@ -249,6 +266,40 @@ impl UserRepository for MongoUserRepository {
         if !error_messages.is_empty() {
             let error_msg = format!("Password must contain: {}", error_messages.join(", "));
             return Err(ApiError::InvalidData(error_msg));
+        }
+
+        Ok(())
+    }
+
+    fn validate_email(&self, email: &str) -> Result<(), ApiError> {
+
+        if email.is_empty() {
+            return Err(ApiError::InvalidData("Email cannot be empty".to_string()));
+        }
+
+        if email.len() > 254 {
+            return Err(ApiError::InvalidData("Email is too long".to_string()));
+        }
+
+        let email_regex = regex::Regex::new(
+            r"^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$"
+        ).unwrap();
+
+        if !email_regex.is_match(email) {
+            return Err(ApiError::InvalidData("Invalid email format".to_string()));
+        }
+
+        // I have no idea if this actually works but well more security is better I guess
+        let disposable_domains = [
+            "tempmail.com", "guerrillamail.com", "mailinator.com", "10minutemail.com",
+            "throwaway.com", "fakeinbox.com", "yopmail.com", "disposable.com",
+            "temp-mail.org", "trashmail.com"
+        ];
+
+        if let Some(domain) = email.split('@').nth(1) {
+            if disposable_domains.iter().any(|&d| domain.eq_ignore_ascii_case(d)) {
+                return Err(ApiError::InvalidData("Disposable email addresses are not allowed".to_string()));
+            }
         }
 
         Ok(())
