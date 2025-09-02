@@ -27,6 +27,8 @@ pub struct User {
     pub verification_code_expires: Option<DateTime<Utc>>,
     pub password_reset_code: Option<String>,
     pub password_reset_expires: Option<DateTime<Utc>>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>
 }
 
 #[derive(Serialize, Deserialize)]

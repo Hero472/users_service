@@ -35,7 +35,7 @@ pub async fn create_user(
         name: AuthUtils::encrypt(&user.name).expect("Failed to encrypt name"),
         email: encrypted_email,
         email_hash: AuthUtils::hash(&user.email).expect("Failed to hash email"),
-        password: AuthUtils::hash(&user.password).expect("Failed to hash password"),
+        password: AuthUtils::hash_password(&user.password).expect("Failed to hash password"),
         phone_number: encrypted_phone,
         role: UserRole::User,
         access_token: None,
@@ -45,6 +45,8 @@ pub async fn create_user(
         verification_code_expires: Some(Utc::now() + Duration::minutes(30)),
         password_reset_code: None,
         password_reset_expires: None,
+        created_at: Utc::now(),
+        updated_at: Utc::now()
     };
 
     match user_repo.create_user(user, password).await {
@@ -72,7 +74,7 @@ pub async fn login_user(
 
                 let user_send = UserSend {
                     id: user.id,
-                    name: user.name,
+                    name: AuthUtils::decrypt(&user.name).unwrap(),
                     phone_number: phone_number,
                     email: AuthUtils::decrypt(&user.email).unwrap(),
                     role: user.role,

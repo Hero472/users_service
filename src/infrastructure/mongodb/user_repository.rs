@@ -9,6 +9,19 @@ use crate::domain::user::model::{CodeRequest, EmailRequest, PasswordResetRequest
 use crate::utils::auth::AuthUtils;
 use crate::utils::errors::ApiError;
 
+pub const DISPOSABLE_EMAIL_DOMAINS: [&str; 10] = [
+    "tempmail.com",
+    "guerrillamail.com", 
+    "mailinator.com",
+    "10minutemail.com",
+    "throwaway.com",
+    "fakeinbox.com",
+    "yopmail.com",
+    "disposable.com",
+    "temp-mail.org",
+    "trashmail.com",
+];
+
 pub struct MongoUserRepository {
     users: mongodb::Collection<User>
 }
@@ -27,25 +40,33 @@ impl UserRepository for MongoUserRepository {
     async fn create_user(&self, user: User, password: &str) -> Result<(), ApiError> {
         self.validate_password_strength(&password)?;
 
-        self.validate_email(&user.email)?;
-
         let email= AuthUtils::decrypt(&user.email)
             .map_err(|e| ApiError::InternalServerError(e.to_string()))?;
 
-        if let Some(_) = self.get_user_by_email(email).await? {
-            return Err(ApiError::InvalidData("user with this email already exists".to_string()));
+        self.validate_email(&email)?;
+
+        if let Some(existing_user) = self.get_user_by_email(&email).await? {
+            if !existing_user.email_verified {
+                // User exists but isn't verified - suggest password recovery
+                return Err(ApiError::InvalidData(
+                    "An account with this email already exists but is not verified. \
+                    If you don't remember your password, please use the password recovery option.".to_string()
+                ));
+            } else {
+                // User exists and is verified
+                return Err(ApiError::InvalidData("User with this email already exists".to_string()));
+            }
         }
+
         self.users.insert_one(&user).await?;
         Ok(())
     }
 
     async fn login_user(&self, credentials: UserLoginReceive) -> Result<Option<User>, ApiError> {
-        let user = self.get_user_by_email(credentials.email).await?;
-
+        let user = self.get_user_by_email(&credentials.email).await?;
         if let Some(mut user) = user {
-            // all credentials must be okay and also account must be active
 
-            let pass = AuthUtils::verify_hash(&credentials.password, &user.password)
+            let pass = AuthUtils::verify_password(&credentials.password, &user.password)
                 .map_err(|e| ApiError::InternalServerError(e.to_string()))?;
 
             if pass && user.email_verified {
@@ -79,19 +100,21 @@ impl UserRepository for MongoUserRepository {
         Ok(users)
     }
  
-    async fn get_user_by_email(&self, email: String) -> Result<Option<User>, ApiError> {
+    async fn get_user_by_email(&self, email: &str) -> Result<Option<User>, ApiError> {
 
-        let email_hash = AuthUtils::hash(&email)
+        let email_hash = AuthUtils::hash(email)
             .map_err(|e| ApiError::InternalServerError(e.to_string()))?;
 
-        match self.users.find_one(doc! { "email_hash": email_hash }).await {
+        match self.users.find_one(doc! { "email_hash": email_hash }).await { // it doesn't find because has is different
             Ok(user) => Ok(user),
             Err(e) => Err(ApiError::MongoError(e))
         }
     }
 
-    async fn update_user(&self, user: User) -> Result<(), ApiError> {
+    async fn update_user(&self, mut user: User) -> Result<(), ApiError> {
         
+        user.updated_at = Utc::now();
+
         let filter = doc! { "email_hash": user.email_hash.clone() };
         let update_doc = bson::to_bson(&user)?;
 
@@ -121,7 +144,7 @@ impl UserRepository for MongoUserRepository {
     }
 
     async fn verify_email(&self, email: String, code: String) -> Result<(), ApiError> {
-        let user = self.get_user_by_email(email).await?;
+        let user = self.get_user_by_email(&email).await?;
 
         let mut user = user.ok_or_else(|| ApiError::NotFound("User not found".to_string()))?;
 
@@ -148,6 +171,8 @@ impl UserRepository for MongoUserRepository {
         }
 
         user.email_verified = true;
+        user.verification_code = None;
+        user.verification_code_expires = None;
         
         self.update_user(user).await
 
@@ -158,14 +183,9 @@ impl UserRepository for MongoUserRepository {
         let expires_at = chrono::Utc::now() + chrono::Duration::minutes(15);
 
         let mut user = self
-            .get_user_by_email(request.email)
+            .get_user_by_email(&request.email)
             .await?
             .ok_or_else(|| ApiError::NotFound("User not found".to_string()))?;
-
-
-        if !user.email_verified {
-            return Err(ApiError::Conflict("Email must be verified before password reset".to_string()));
-        }
 
         let code = AuthUtils::hash(&code)
             .map_err(|e| ApiError::InternalServerError(e.to_string()))?;
@@ -179,7 +199,7 @@ impl UserRepository for MongoUserRepository {
     
     async fn verify_password_code(&self, request: CodeRequest) -> Result<(), ApiError> {
         let user = self
-            .get_user_by_email(request.email)
+            .get_user_by_email(&request.email)
             .await?
             .ok_or_else(|| ApiError::NotFound("User not found".to_string()))?;
 
@@ -222,11 +242,11 @@ impl UserRepository for MongoUserRepository {
         }
 
         let mut user = self
-            .get_user_by_email(request.email)
+            .get_user_by_email(&request.email)
             .await?
             .ok_or_else(|| ApiError::NotFound("User not found".to_string()))?;
 
-        let new_password = AuthUtils::hash(&request.new_password)
+        let new_password = AuthUtils::hash_password(&request.new_password)
             .map_err(|e| ApiError::InternalServerError(e.to_string()))?;
 
         user.password = new_password;
@@ -289,15 +309,8 @@ impl UserRepository for MongoUserRepository {
             return Err(ApiError::InvalidData("Invalid email format".to_string()));
         }
 
-        // I have no idea if this actually works but well more security is better I guess
-        let disposable_domains = [
-            "tempmail.com", "guerrillamail.com", "mailinator.com", "10minutemail.com",
-            "throwaway.com", "fakeinbox.com", "yopmail.com", "disposable.com",
-            "temp-mail.org", "trashmail.com"
-        ];
-
         if let Some(domain) = email.split('@').nth(1) {
-            if disposable_domains.iter().any(|&d| domain.eq_ignore_ascii_case(d)) {
+            if DISPOSABLE_EMAIL_DOMAINS.iter().any(|&d| domain.eq_ignore_ascii_case(d)) {
                 return Err(ApiError::InvalidData("Disposable email addresses are not allowed".to_string()));
             }
         }

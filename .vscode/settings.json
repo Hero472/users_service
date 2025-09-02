@@ -16,6 +16,7 @@
     "Secur",
     "serde",
     "tempmail",
+    "testuser",
     "thiserror",
     "trashmail",
     "yopmail"

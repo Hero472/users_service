@@ -18,11 +18,18 @@ pub struct AuthUtils;
 
 impl AuthUtils {
 
-    pub fn hash(input: &str) -> Result<String, bcrypt::BcryptError> {
+    pub fn hash(input: &str) -> Result<String, Box<dyn Error>> {
+        let mut hasher = Sha256::new_with_prefix(input.as_bytes());
+        hasher.update(input.as_bytes());
+        let result = hasher.finalize();
+        Ok(hex::encode(result))
+    }
+
+    pub fn hash_password(input: &str) -> Result<String, bcrypt::BcryptError> {
         crypt_hash(input, DEFAULT_COST)
     }
 
-    pub fn verify_hash(password: &str, hash: &str) -> Result<bool, bcrypt::BcryptError> {
+    pub fn verify_password(password: &str, hash: &str) -> Result<bool, bcrypt::BcryptError> {
         bcrypt::verify(password, hash)
     }
 
@@ -164,9 +171,9 @@ mod tests {
         let input = "test_password";
         let hash = AuthUtils::hash(input).unwrap();
         
-        assert!(AuthUtils::verify_hash(input, &hash).unwrap());
+        assert!(AuthUtils::verify_password(input, &hash).unwrap());
         
-        assert!(!AuthUtils::verify_hash("wrong_password", &hash).unwrap());
+        assert!(!AuthUtils::verify_password("wrong_password", &hash).unwrap());
     }
 
     #[test]
@@ -340,7 +347,7 @@ mod tests {
         
         // Hash password
         let password_hash = AuthUtils::hash(password).unwrap();
-        assert!(AuthUtils::verify_hash(password, &password_hash).unwrap());
+        assert!(AuthUtils::verify_password(password, &password_hash).unwrap());
         
         // Encrypt email
         let encrypted_email = AuthUtils::encrypt(email).expect("Encryption should work");
