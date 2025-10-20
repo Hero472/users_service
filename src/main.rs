@@ -7,8 +7,6 @@ async fn entry_point() -> impl Responder {
     "This is the Users API. Use the /register endpoint to create an user."
 }
 
-// TODO: I need to make a recovery of the account sending an email with a link to reset the password
-
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
 

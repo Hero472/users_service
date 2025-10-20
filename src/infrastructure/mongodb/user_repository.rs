@@ -6,7 +6,7 @@ use mongodb::bson::{self, doc};
 use crate::infrastructure::database::mongo_context::MongoContext;
 use crate::domain::user::repository::UserRepository;
 use crate::domain::user::model::{CodeRequest, EmailRequest, PasswordResetRequest, User, UserLoginReceive};
-use crate::utils::auth::AuthUtils;
+use crate::utils::security::auth::AuthUtils;
 use crate::utils::errors::ApiError;
 
 pub const DISPOSABLE_EMAIL_DOMAINS: [&str; 10] = [
@@ -47,13 +47,11 @@ impl UserRepository for MongoUserRepository {
 
         if let Some(existing_user) = self.get_user_by_email(&email).await? {
             if !existing_user.email_verified {
-                // User exists but isn't verified - suggest password recovery
                 return Err(ApiError::InvalidData(
                     "An account with this email already exists but is not verified. \
                     If you don't remember your password, please use the password recovery option.".to_string()
                 ));
             } else {
-                // User exists and is verified
                 return Err(ApiError::InvalidData("User with this email already exists".to_string()));
             }
         }
@@ -70,19 +68,18 @@ impl UserRepository for MongoUserRepository {
                 .map_err(|e| ApiError::InternalServerError(e.to_string()))?;
 
             if pass && user.email_verified {
-                // Generate access token and refresh token
                 let email= AuthUtils::decrypt(&user.email)
                     .map_err(|e| ApiError::InternalServerError(e.to_string()))?;
 
-                user.access_token = Some(AuthUtils::generate_token(&email, 30));
-                user.refresh_token = Some(AuthUtils::generate_token(&email, 60*24*30));
+                user.access_token = Some(AuthUtils::generate_access_token(&email, user.role.clone()));
+                user.refresh_token = Some(AuthUtils::generate_refresh_token(&email));
                 self.update_user(user.clone()).await?;
                 return Ok(Some(user));
             } else {
-                return Ok(None); // Password mismatch
+                return Ok(None);
             }
         }
-        Ok(None) // Owner not found
+        Ok(None)
     }
 
     async fn get_all_users(&self) -> Result<Vec<User>, ApiError> {
@@ -158,7 +155,6 @@ impl UserRepository for MongoUserRepository {
         let verification_expiry = user.verification_code_expires
             .ok_or_else(|| ApiError::BadRequest("No verification expiry found".to_string()))?;
 
-        // Verify code and expiry
         let code = AuthUtils::hash(&code)
             .map_err(|e| ApiError::InternalServerError(e.to_string()))?;
 
@@ -236,7 +232,6 @@ impl UserRepository for MongoUserRepository {
             return Err(ApiError::BadRequest("Passwords do not match".to_string()));
         }
 
-        // Check password strength
         if request.new_password.len() < 8 {
             return Err(ApiError::BadRequest("Password must be at least 8 characters".to_string()));
         }
@@ -318,4 +313,248 @@ impl UserRepository for MongoUserRepository {
         Ok(())
     }
 
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use testcontainers::{runners::AsyncRunner, core::WaitFor};
+    use testcontainers_modules::mongo::Mongo;
+
+    fn create_test_user(email: &str) -> User {
+        let email_hash = AuthUtils::hash(email).unwrap();
+        let encrypted_email = AuthUtils::encrypt(email).unwrap();
+        let password_hash = AuthUtils::hash_password("Test123!").unwrap();
+        
+        User {
+            id: Some(bson::oid::ObjectId::new()),
+            name: "Some_name".to_string(),
+            email: encrypted_email,
+            email_hash,
+            phone_number: "123123".to_string(),
+            password: password_hash,
+            role: crate::domain::UserRole::User,
+            email_verified: false,
+            verification_code: Some(AuthUtils::hash("123456").unwrap()),
+            verification_code_expires: Some(Utc::now() + chrono::Duration::hours(1)),
+            password_reset_code: None,
+            password_reset_expires: None,
+            access_token: None,
+            refresh_token: None,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        }
+    }
+
+
+    #[tokio::test]
+    async fn test_create_user_success() {
+    
+        let container = Mongo::default().start().await.unwrap();
+        let host = container.get_host().await.unwrap();
+        let port = container.get_host_port_ipv4(27017).await.unwrap();
+        let connection_string = format!("mongodb://{}:{}", host, port);
+        let mongo_context = MongoContext::init(&connection_string, "test_db")
+            .await
+            .expect("Failed to connect to MongoDB");
+        let repo = MongoUserRepository::new(&mongo_context);
+
+        let test_user = create_test_user("test@example.com");
+    
+        let result = repo.create_user(test_user, "ValidPass1!").await;
+
+        assert!(result.is_ok(), "User creation should succeed: {:?}", result);
+        
+        let found_user = repo.get_user_by_email("test@example.com").await.unwrap();
+        assert!(found_user.is_some(), "User should be found in database");
+
+    }
+    
+    #[tokio::test]
+    async fn test_create_user_duplicate_email() {
+
+        let container = Mongo::default().start().await.unwrap();
+        let host = container.get_host().await.unwrap();
+        let port = container.get_host_port_ipv4(27017).await.unwrap();
+        let connection_string = format!("mongodb://{}:{}", host, port);
+        let mongo_context = MongoContext::init(&connection_string, "test_db")
+            .await
+            .expect("Failed to connect to MongoDB");
+        let repo = MongoUserRepository::new(&mongo_context);
+
+        let test_user1 = create_test_user("duplicate@example.com");
+        let test_user2 = create_test_user("duplicate@example.com");
+
+        let result1 = repo.create_user(test_user1, "ValidPass1!").await;
+        let _ = result1.clone().inspect_err(|e| println!("failed to read {}", e));
+        assert!(result1.is_ok(), "First user creation should succeed");
+
+        let result2 = repo.create_user(test_user2, "ValidPass1!").await;
+        assert!(
+            matches!(result2, Err(ApiError::InvalidData(_))),
+            "Should fail with InvalidData for duplicate email: {:?}", result2
+        );
+    }
+
+    #[tokio::test]
+    async fn test_create_user_duplicate_unverified_email() {
+        
+        let container = Mongo::default().start().await.unwrap();
+        let host = container.get_host().await.unwrap();
+        let port = container.get_host_port_ipv4(27017).await.unwrap();
+        let connection_string = format!("mongodb://{}:{}", host, port);
+        let mongo_context = MongoContext::init(&connection_string, "test_db")
+            .await
+            .expect("Failed to connect to MongoDB");
+        let repo = MongoUserRepository::new(&mongo_context);
+
+        let mut test_user1 = create_test_user("unverified@example.com");
+        test_user1.email_verified = false;
+        
+        let test_user2 = create_test_user("unverified@example.com");
+
+        let result1 = repo.create_user(test_user1, "ValidPass1!").await;
+        assert!(result1.is_ok());
+
+        let result2 = repo.create_user(test_user2, "ValidPass1!").await;
+        
+        match result2 {
+            Err(ApiError::InvalidData(msg)) => {
+                assert!(
+                    msg.contains("not verified") || msg.contains("already exists"),
+                    "Error message should mention unverified account: {}",
+                    msg
+                );
+            }
+            other => panic!("Expected InvalidData error, got: {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_create_user_weak_password() {
+        let container = Mongo::default().start().await.unwrap();
+        let host = container.get_host().await.unwrap();
+        let port = container.get_host_port_ipv4(27017).await.unwrap();
+        let connection_string = format!("mongodb://{}:{}", host, port);
+        let mongo_context = MongoContext::init(&connection_string, "test_db")
+            .await
+            .expect("Failed to connect to MongoDB");
+        let repo = MongoUserRepository::new(&mongo_context);
+
+        let test_user = create_test_user("weakpass@example.com");
+
+        let weak_passwords = vec![
+            "short",           // Too short
+            "nouppercase1!",   // No uppercase
+            "NOLOWERCASE1!",   // No lowercase  
+            "NoDigits!",       // No digits
+            "NoSpecial123",    // No special chars
+        ];
+
+        for password in weak_passwords {
+            let result = repo.create_user(test_user.clone(), password).await;
+            assert!(
+                matches!(result, Err(ApiError::InvalidData(_))),
+                "Weak password '{}' should be rejected: {:?}",
+                password,
+                result
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_create_user_invalid_email() {
+        let container = Mongo::default().start().await.unwrap();
+        let host = container.get_host().await.unwrap();
+        let port = container.get_host_port_ipv4(27017).await.unwrap();
+        let connection_string = format!("mongodb://{}:{}", host, port);
+        let mongo_context = MongoContext::init(&connection_string, "test_db")
+            .await
+            .expect("Failed to connect to MongoDB");
+        let repo = MongoUserRepository::new(&mongo_context);
+
+        let invalid_emails = vec![
+            "invalid-email",           // No @ symbol
+            "user@mailinator.com",     // Disposable domain
+            "",                        // Empty email
+        ];
+
+        for email in invalid_emails {
+            let test_user = create_test_user(email);
+            let result = repo.create_user(test_user, "ValidPass1!").await;
+            
+            assert!(
+                matches!(result, Err(ApiError::InvalidData(_))),
+                "Invalid email '{}' should be rejected: {:?}",
+                email,
+                result
+            );
+        }
+    }
+
+     #[tokio::test]
+    async fn test_create_user_verification_code_preserved() {
+        let container = Mongo::default().start().await.unwrap();
+        let host = container.get_host().await.unwrap();
+        let port = container.get_host_port_ipv4(27017).await.unwrap();
+        let connection_string = format!("mongodb://{}:{}", host, port);
+        let mongo_context = MongoContext::init(&connection_string, "test_db")
+            .await
+            .expect("Failed to connect to MongoDB");
+        let repo = MongoUserRepository::new(&mongo_context);
+
+        let test_user = create_test_user("verification@example.com");
+
+        let result = repo.create_user(test_user, "ValidPass1!").await;
+        assert!(result.is_ok());
+
+        let found_user = repo.get_user_by_email("verification@example.com").await.unwrap().unwrap();
+        
+        assert!(
+            found_user.verification_code.is_some(),
+            "Verification code should be preserved"
+        );
+        assert!(
+            found_user.verification_code_expires.is_some(),
+            "Verification expiry should be preserved"
+        );
+        assert!(
+            !found_user.email_verified,
+            "New user should not be email verified"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_validate_email_too_long() {
+        let container = Mongo::default().start().await.unwrap();
+        let host = container.get_host().await.unwrap();
+        let port = container.get_host_port_ipv4(27017).await.unwrap();
+        let connection_string = format!("mongodb://{}:{}", host, port);
+        let mongo_context = MongoContext::init(&connection_string, "test_db")
+            .await
+            .expect("Failed to connect to MongoDB");
+        let repo = MongoUserRepository::new(&mongo_context);
+
+        let long_email_255 = format!("{}@a.com", "a".repeat(249));
+        let long_email_254 = format!("{}@a.com", "a".repeat(248));
+
+        let test_cases = vec![
+            ("short@example.com".to_string(), true, "normal email"),
+            (long_email_255, false, "255 chars - too long"), 
+            (long_email_254, true, "254 chars - at limit"),
+            ("".to_string(), false, "empty email"),
+        ];
+
+        for (email, should_be_valid, description) in test_cases {
+            let result = repo.validate_email(&email);
+            assert_eq!(
+                result.is_ok(), 
+                should_be_valid,
+                "Failed for case: {} - email: '{}', length is: {}",
+                description, 
+                if email.len() > 50 { format!("{}...", &email[..50]) } else { email.to_string() },
+                email.len()
+            );
+        }
+    }
 }

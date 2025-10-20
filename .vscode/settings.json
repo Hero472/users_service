@@ -11,6 +11,8 @@
     "Luma",
     "mailinator",
     "minutemail",
+    "NOLOWERCASE",
+    "nouppercase",
     "Pkcs",
     "qrcode",
     "Secur",

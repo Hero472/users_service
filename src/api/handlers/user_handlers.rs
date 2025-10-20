@@ -1,6 +1,7 @@
 use actix_web::{web, HttpResponse, Responder, ResponseError};
 use chrono::{Duration, Utc};
-use crate::{api::state::AppState, domain::{email::service::EmailService, user::{model::{CodeRequest, EmailRequest, PasswordResetRequest, User, UserLoginReceive, UserRegisterReceive, UserRole, UserSend, VerifyEmail}, repository::UserRepository}}, infrastructure::mongodb::user_repository::MongoUserRepository, utils::{auth::AuthUtils, errors::ApiError}};
+
+use crate::{api::state::AppState, domain::{email::service::EmailService, repository::UserRepository, CodeRequest, EmailRequest, PasswordResetRequest, User, UserLoginReceive, UserRegisterReceive, UserRole, UserSend, VerifyEmail}, infrastructure::user_repository::MongoUserRepository, utils::{ApiError, AuthUtils}};
 
 pub async fn create_user(
     state: web::Data<AppState>,

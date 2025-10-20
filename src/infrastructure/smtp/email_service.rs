@@ -10,7 +10,7 @@ use crate::domain::email::model::Email;
 use crate::domain::email::service::EmailService;
 use crate::utils::errors::ApiError;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct SmtpEmailService {
     username: String,
     mailer:  AsyncSmtpTransport<Tokio1Executor>
@@ -30,6 +30,12 @@ impl SmtpEmailService {
     }
 
     pub async fn send_email_internal(&self, email: &Email) -> Result<(), Box<dyn Error>> {
+        let message = self.build_message(email)?;
+        self.mailer.send(message).await?;
+        Ok(())
+    }
+
+    fn build_message(&self, email: &Email) -> Result<Message, Box<dyn Error>> {
         let message = Message::builder()
             .from(format!("App <{}>", self.username).parse::<Mailbox>()?)
             .to(format!("<{}>", email.to).parse::<Mailbox>()?)
@@ -38,11 +44,9 @@ impl SmtpEmailService {
                 lettre::message::MultiPart::alternative_plain_html(
                     email.text_body.clone(),
                     email.html_body.clone(),
-                )
+                ),
             )?;
-
-        self.mailer.send(message).await?;
-        Ok(())
+        Ok(message)
     }
 }
 
@@ -118,4 +122,102 @@ impl EmailService for SmtpEmailService {
             Err(_) => Err(email_sent.unwrap_err())
         }
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_smtp_service_creation() { 
+        let result = std::panic::catch_unwind(|| {
+            SmtpEmailService::new(
+                "localhost",
+                "test@test.com", 
+                "test"
+            )
+        });
+        
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_build_message_success() {
+        let service = SmtpEmailService::new(
+                "localhost",
+                "test@test.com", 
+                "test"
+            ).unwrap();
+
+        let email = Email {
+            to: "recipient@example.com".to_string(),
+            subject: "Test Subject".to_string(),
+            html_body: "<p>Test HTML</p>".to_string(),
+            text_body: "Test Text".to_string(),
+        };
+
+        let result = service.build_message(&email);
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_build_message_invalid_email() {
+        let service = SmtpEmailService::new(
+                "localhost",
+                "test@test.com", 
+                "test"
+            ).unwrap();
+
+        let email = Email {
+            to: "invalid-email".to_string(),
+            subject: "Test Subject".to_string(),
+            html_body: "<p>Test HTML</p>".to_string(),
+            text_body: "Test Text".to_string(),
+        };
+
+        let result = service.build_message(&email);
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_build_message_empty_subject() {
+        let service = SmtpEmailService::new(
+                "localhost",
+                "test@test.com", 
+                "test"
+            ).unwrap();
+
+        let email = Email {
+            to: "recipient@example.com".to_string(),
+            subject: "".to_string(),
+            html_body: "<p>Test HTML</p>".to_string(),
+            text_body: "Test Text".to_string(),
+        };
+
+        let result = service.build_message(&email);
+
+        assert!(result.is_ok())
+    }
+
+    #[tokio::test]
+    async fn test_send_email_internal() {
+        let service = SmtpEmailService::new(
+                "localhost",
+                "test@test.com", 
+                "test"
+            ).unwrap();
+
+        let email = Email {
+            to: "recipient@example.com".to_string(),
+            subject: "".to_string(),
+            html_body: "<p>Test HTML</p>".to_string(),
+            text_body: "Test Text".to_string(),
+        };
+
+        let result = service.send_email_internal(&email).await;
+
+        assert!(result.is_err())
+        // Connection refused, I need to do something about this
+    }
+
 }

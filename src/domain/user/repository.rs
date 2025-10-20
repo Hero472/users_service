@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+
 use crate::{domain::user::model::{CodeRequest, EmailRequest, PasswordResetRequest, User, UserLoginReceive}, utils::errors::ApiError};
 
 #[async_trait]

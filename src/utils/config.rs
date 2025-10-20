@@ -49,3 +49,77 @@ impl AppConfig {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::env;
+    use temp_env;
+
+    // #[test]
+    // fn test_global_config_initialization() {
+    //     temp_env::with_vars(vec![
+    //         ("DATABASE_URL", Some("test_db_url")),
+    //         ("SMTP_SERVER", Some("test_smtp_server")),
+    //         ("SMTP_USERNAME", Some("test_smtp_user")),
+    //         ("SMTP_PASSWORD", Some("test_smtp_pass")),
+    //         ("EMAIL_USER", Some("test_email_user")),
+    //         ("EMAIL_PASSWORD", Some("test_email_pass")),
+    //         ("EMAIL_HOST", Some("test_email_host")),
+    //         ("EMAIL_PORT", Some("587")),
+    //         ("SECRET_KEY", Some("test_secret_key")),
+    //         ("ENCRYPTION_KEY", Some("test_encryption_key")),
+    //     ], || {
+    //         let config = AppConfig::global();
+            
+    //         assert_eq!(config.database_url, "test_db_url");
+    //         assert_eq!(config.smtp_server, "test_smtp_server");
+    //         assert_eq!(config.email_port, "587");
+    //     });
+    // }
+
+    #[test]
+    fn test_config_is_singleton() {
+        temp_env::with_vars(vec![
+            ("DATABASE_URL", Some("test_db_url")),
+            ("SMTP_SERVER", Some("test_smtp_server")),
+            ("SMTP_USERNAME", Some("test_smtp_user")),
+            ("SMTP_PASSWORD", Some("test_smtp_pass")),
+            ("EMAIL_USER", Some("test_email_user")),
+            ("EMAIL_PASSWORD", Some("test_email_pass")),
+            ("EMAIL_HOST", Some("test_email_host")),
+            ("EMAIL_PORT", Some("587")),
+            ("SECRET_KEY", Some("test_secret_key")),
+            ("ENCRYPTION_KEY", Some("test_encryption_key")),
+        ], || {
+            let config1 = AppConfig::global();
+            let config2 = AppConfig::global();
+            
+            assert!(std::ptr::eq(config1, config2));
+        });
+    }
+
+    // #[test]
+    // fn test_config_values_are_correctly_loaded() {
+    //     temp_env::with_vars(vec![
+    //         ("DATABASE_URL", Some("test_db_url")),
+    //         ("SMTP_SERVER", Some("test_smtp_server")),
+    //         ("SMTP_USERNAME", Some("test_smtp_user")),
+    //         ("SMTP_PASSWORD", Some("test_smtp_pass")),
+    //         ("EMAIL_USER", Some("test_email_user")),
+    //         ("EMAIL_PASSWORD", Some("test_email_pass")),
+    //         ("EMAIL_HOST", Some("test_email_host")),
+    //         ("EMAIL_PORT", Some("587")),
+    //         ("SECRET_KEY", Some("test_secret_key")),
+    //         ("ENCRYPTION_KEY", Some("test_encryption_key")),
+    //     ], || {
+    //         let config = AppConfig::global();
+            
+    //         assert!(!config.database_url.is_empty());
+    //         assert!(!config.secret_key.is_empty());
+    //         assert!(!config.encryption_key.is_empty());
+    //         assert_eq!(config.email_port, "587");
+    //     });
+    // }
+
+}

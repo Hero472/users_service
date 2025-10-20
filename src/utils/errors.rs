@@ -111,16 +111,12 @@ mod tests {
     use mongodb::{error::{Error as MongoError}, bson::{ser::Error as BsonError, de::Error as BsonDeError}};
     use serde_json::Value;
 
-    // Helper function to extract JSON from HttpResponse
     async fn extract_json_from_response(response: HttpResponse) -> Value {
-        // Extract the body directly from HttpResponse
         let body = response.into_body();
-        // Use try_into_bytes() to get the bytes
         let bytes = actix_web::body::to_bytes(body).await.unwrap();
         serde_json::from_slice(&bytes).expect("Failed to parse JSON response")
     }
 
-    // Helper function to create mock MongoDB errors
     fn create_mock_mongo_error() -> MongoError {
         MongoError::from(std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
@@ -128,30 +124,24 @@ mod tests {
         ))
     }
 
-    // Helper function to create mock BSON serialization error
     fn create_mock_bson_error() -> BsonError {
-        // HashMap with integer keys (not allowed in BSON)
         let mut map = HashMap::new();
         map.insert(42, "value");
         
         bson::to_bson(&map).unwrap_err()
     }
 
-    // Helper function to create mock BSON deserialization error
     fn create_mock_bson_de_error() -> BsonDeError {
-        // Create a deserialization error by trying to deserialize invalid data
         let invalid_bson = bson::Bson::RegularExpression(bson::Regex {
             pattern: "".to_string(),
             options: "".to_string(),
         });
         
-        // Try to deserialize a regex as a string (will fail)
         bson::from_bson::<String>(invalid_bson).unwrap_err()
     }
 
     #[test]
     async fn test_api_error_display() {
-        // Test Display trait implementation (error messages)
         let conflict = ApiError::Conflict("Resource already exists".to_string());
         assert_eq!(conflict.to_string(), "Conflict: Resource already exists");
 
@@ -170,7 +160,6 @@ mod tests {
 
     #[test]
     async fn test_api_error_debug() {
-        // Test Debug trait implementation
         let conflict = ApiError::Conflict("Test".to_string());
         let debug_str = format!("{:?}", conflict);
         assert!(debug_str.contains("Conflict"));
@@ -179,7 +168,6 @@ mod tests {
 
     #[test]
     async fn test_api_error_clone() {
-        // Test Clone trait implementation
         let original = ApiError::BadRequest("Original message".to_string());
         let cloned = original.clone();
         
@@ -291,7 +279,7 @@ mod tests {
         let api_error: ApiError = mongo_error.into();
         
         match api_error {
-            ApiError::MongoError(_) => {} // Expected
+            ApiError::MongoError(_) => {}
             _ => panic!("Expected MongoError variant"),
         }
     }
@@ -302,7 +290,7 @@ mod tests {
         let api_error: ApiError = bson_error.into();
         
         match api_error {
-            ApiError::SerializationError(_) => {} // Expected
+            ApiError::SerializationError(_) => {}
             _ => panic!("Expected SerializationError variant"),
         }
     }
@@ -313,7 +301,7 @@ mod tests {
         let api_error: ApiError = bson_de_error.into();
         
         match api_error {
-            ApiError::DeserializationError(_) => {} // Expected
+            ApiError::DeserializationError(_) => {}
             _ => panic!("Expected DeserializationError variant"),
         }
     }
@@ -324,12 +312,10 @@ mod tests {
         let response = error.error_response();
         let json = extract_json_from_response(response).await;
         
-        // Verify JSON structure
         assert!(json.is_object());
         assert!(json["error"].is_string());
         assert!(json["code"].is_number());
         
-        // Verify only expected fields are present
         let obj = json.as_object().unwrap();
         assert_eq!(obj.len(), 2);
         assert!(obj.contains_key("error"));
@@ -338,7 +324,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_empty_error_messages() {
-        // Test with empty error messages
         let error = ApiError::Conflict("".to_string());
         let response = error.error_response();
         let json = extract_json_from_response(response).await;
@@ -349,7 +334,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_long_error_messages() {
-        // Test with very long error messages
         let long_message = "a".repeat(1000);
         let error = ApiError::BadRequest(long_message.clone());
         let response = error.error_response();
@@ -383,39 +367,14 @@ mod tests {
         let _serialization = ApiError::SerializationError(create_mock_bson_error());
         let _deserialization = ApiError::DeserializationError(create_mock_bson_de_error());
         
-        // If we get here without panic, all variants are covered
         assert!(true);
     }
-
-    // TODO: solve this test case
-    // #[test]
-    // async fn test_error_chain() {
-    //     // Test that errors can be chained
-    //     let mongo_error = create_mock_mongo_error();
-    //     let api_error = ApiError::from(mongo_error);
-
-    //     println!("{}", api_error);
-    //     println!("{}", std::error::Error::source(&api_error).is_some());
-
-    //     if let Some(source) = std::error::Error::source(&api_error) {
-    //         println!("Source: {}", source);
-    //         if let Some(source2) = source.source() {
-    //             println!("Source's source: {}", source2);
-    //         }
-    //     } else {
-    //         println!("Source is None");
-    //     }
-
-    //     // The source should be available
-    //     assert!(std::error::Error::source(&api_error).is_some());
-    // }
 
     #[tokio::test]
     async fn test_content_type_header() {
         let error = ApiError::BadRequest("test".to_string());
         let response = error.error_response();
         
-        // Check that the response has correct content type for JSON
         let content_type = response.headers().get("content-type");
         assert!(content_type.is_some());
         

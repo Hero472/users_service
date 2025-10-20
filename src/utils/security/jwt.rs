@@ -1,21 +1,36 @@
-use actix_web::dev::{ServiceRequest, ServiceResponse};
-use std::{rc::Rc, task::{Context, Poll}};
+use actix_web::{dev::{ServiceRequest, ServiceResponse}, HttpMessage};
+use serde_json::Value;
+use std::{rc::Rc, sync::Arc, task::{Context, Poll}};
 use actix_web::Error;
 use actix_service::{Service, Transform};
 use futures::{future::{ok, LocalBoxFuture, Ready}};
 use serde::{Deserialize, Serialize};
-// use jsonwebtoken::{encode, errors::Result as JwtResult, EncodingKey, Header};
 use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
 
-use crate::utils::config::AppConfig;
+use crate::domain::UserRole;
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct Claims {
+pub struct Claims<T> {
     pub sub: String,
-    pub exp: usize,
+    pub exp: u64,
+    pub iat: u64,
+    pub data: T
 }
 
-pub struct JwtMiddleware;
+#[derive(Debug, Serialize, Deserialize)]
+pub struct AccessData {
+    pub role: UserRole,
+    pub email: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct RefreshData {
+    pub jti: String,
+}
+
+pub struct JwtMiddleware {
+    pub secret_key: Arc<String>
+}
 
 impl<S, B> Transform<S, ServiceRequest> for JwtMiddleware
 where
@@ -31,12 +46,14 @@ where
     fn new_transform(&self, service: S) -> Self::Future {
         ok(JwtMiddlewareService {
             service: Rc::new(service),
+            secret_key: Arc::clone(&self.secret_key)
         })
     }
 }
 
 pub struct JwtMiddlewareService<S> {
     service: Rc<S>,
+    secret_key: Arc<String>
 }
 
 impl<S, B> Service<ServiceRequest> for JwtMiddlewareService<S>
@@ -54,7 +71,6 @@ where
 
     fn call(&self, req: ServiceRequest) -> Self::Future {
         let service = Rc::clone(&self.service);
-        let config = AppConfig::global();
         
         let auth_header = match req.headers().get("Authorization") {
             Some(header) => header,
@@ -91,15 +107,15 @@ where
         let mut validation = Validation::new(Algorithm::HS256);
         validation.validate_exp = true;
 
-        let token_data = decode::<Claims>(
+        let token_data = decode::<Claims<Value>>(
             token,
-            &DecodingKey::from_secret(config.secret_key.as_ref()),
+            &DecodingKey::from_secret(self.secret_key.as_bytes()),
             &validation
         );
 
         match token_data {
-            Ok(_data) => {
-                // req.extensions_mut().insert(data.claims);
+            Ok(data) => {
+                req.extensions_mut().insert(data.claims);
                 return Box::pin(service.call(req))
             },
             Err(err) => {
@@ -124,32 +140,43 @@ where
     }
 }
 
+// TESTING
+
 #[cfg(test)]
 mod tests {
+    use crate::utils::AppConfig;
+
     use super::*;
     use actix_web::{
         http::StatusCode, middleware::DefaultHeaders, test, web, App, HttpRequest, HttpResponse, Result as ActixResult
     };
     use jsonwebtoken::{encode, EncodingKey, Header};
     use chrono::{Utc, Duration};
+    use serde_json::json;
 
     // Test handler that returns a simple response
     async fn test_handler(_req: HttpRequest) -> ActixResult<HttpResponse> {
         Ok(HttpResponse::Ok().json("Protected endpoint accessed"))
     }
 
-    // Helper function to create a valid JWT token
     fn create_valid_token(email: &str, minutes_valid: i64) -> String {
         let config = AppConfig::global();
         
-        let expiration = Utc::now()
+        let now = Utc::now();
+        let expiration = now
             .checked_add_signed(Duration::minutes(minutes_valid))
             .expect("valid timestamp")
-            .timestamp() as usize;
+            .timestamp();
 
         let claims = Claims {
             sub: email.to_owned(),
-            exp: expiration,
+            exp: expiration as u64,
+            iat: now.timestamp() as u64,
+            data: json!({
+                "email": email,
+                "created_at": now.to_rfc3339(),
+                "token_type": "access"
+            }),
         };
 
         encode(
@@ -159,13 +186,12 @@ mod tests {
         ).unwrap()
     }
 
-    // Helper function to create an expired JWT token
     fn create_expired_token(email: &str) -> String {
-        create_valid_token(email, -60) // Expired 1 hour ago
+        create_valid_token(email, -60)
     }
 
-    // Helper function to create a token with wrong secret
     fn create_token_wrong_secret(email: &str) -> String {
+        let now = Utc::now();
         let expiration = Utc::now()
             .checked_add_signed(Duration::minutes(60))
             .expect("valid timestamp")
@@ -173,7 +199,13 @@ mod tests {
 
         let claims = Claims {
             sub: email.to_owned(),
-            exp: expiration,
+            exp: expiration as u64,
+            iat: now.timestamp() as u64,
+            data: json!({
+                "email": email,
+                "created_at": now.to_rfc3339(),
+                "token_type": "access"
+            }),
         };
 
         encode(
@@ -185,11 +217,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_middleware_with_valid_token() {
+        let config = AppConfig::global();
         let token = create_valid_token("test@example.com", 60);
         
         let app = test::init_service(
             App::new()
-                .wrap(JwtMiddleware)
+                .wrap(JwtMiddleware {secret_key: Arc::new(config.secret_key.clone())})
                 .route("/protected", web::get().to(test_handler))
         ).await;
 
@@ -209,7 +242,7 @@ mod tests {
     async fn test_middleware_with_missing_auth_header() {
         let app = test::init_service(
             App::new()
-                .wrap(JwtMiddleware)
+                .wrap(JwtMiddleware {secret_key: Arc::new("a".to_string())})
                 .route("/protected", web::get().to(test_handler))
         ).await;
 
@@ -231,7 +264,7 @@ mod tests {
     async fn test_middleware_with_malformed_auth_header() {
         let app = test::init_service(
             App::new()
-                .wrap(JwtMiddleware)
+                .wrap(JwtMiddleware {secret_key: Arc::new("a".to_string())})
                 .route("/protected", web::get().to(test_handler))
         ).await;
 
@@ -255,7 +288,7 @@ mod tests {
     async fn test_middleware_with_empty_bearer_token() {
         let app = test::init_service(
             App::new()
-                .wrap(JwtMiddleware)
+                .wrap(JwtMiddleware {secret_key: Arc::new("a".to_string())})
                 .route("/protected", web::get().to(test_handler))
         ).await;
 
@@ -278,7 +311,7 @@ mod tests {
     async fn test_middleware_with_invalid_token() {
         let app = test::init_service(
             App::new()
-                .wrap(JwtMiddleware)
+                .wrap(JwtMiddleware {secret_key: Arc::new("a".to_string())})
                 .route("/protected", web::get().to(test_handler))
         ).await;
 
@@ -303,7 +336,7 @@ mod tests {
         
         let app = test::init_service(
             App::new()
-                .wrap(JwtMiddleware)
+                .wrap(JwtMiddleware {secret_key: Arc::new("a".to_string())})
                 .route("/protected", web::get().to(test_handler))
         ).await;
 
@@ -328,7 +361,7 @@ mod tests {
         
         let app = test::init_service(
             App::new()
-                .wrap(JwtMiddleware)
+                .wrap(JwtMiddleware {secret_key: Arc::new("a".to_string())})
                 .route("/protected", web::get().to(test_handler))
         ).await;
 
@@ -353,7 +386,7 @@ mod tests {
         
         let app = test::init_service(
             App::new()
-                .wrap(JwtMiddleware)
+                .wrap(JwtMiddleware {secret_key: Arc::new("a".to_string())})
                 .route("/protected", web::get().to(test_handler))
         ).await;
 
@@ -379,7 +412,7 @@ mod tests {
         
         let app = test::init_service(
             App::new()
-                .wrap(JwtMiddleware)
+                .wrap(JwtMiddleware {secret_key: Arc::new("a".to_string())})
                 .route("/protected", web::get().to(test_handler))
         ).await;
 
@@ -401,12 +434,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_middleware_with_different_users() {
+        let config = AppConfig::global();
         let token1 = create_valid_token("user1@example.com", 60);
         let token2 = create_valid_token("user2@example.com", 60);
         
         let app = test::init_service(
             App::new()
-                .wrap(JwtMiddleware)
+                .wrap(JwtMiddleware {secret_key: Arc::new(config.secret_key.clone())})
                 .route("/protected", web::get().to(test_handler))
         ).await;
 
@@ -431,15 +465,16 @@ mod tests {
 
     #[tokio::test]
     async fn test_middleware_multiple_requests_same_token() {
+        let config = AppConfig::global();
+
         let token = create_valid_token("test@example.com", 60);
         
         let app = test::init_service(
             App::new()
-                .wrap(JwtMiddleware)
+                .wrap(JwtMiddleware {secret_key: Arc::new(config.secret_key.clone())})
                 .route("/protected", web::get().to(test_handler))
         ).await;
 
-        // Make multiple requests with the same token
         for _i in 0..3 {
             let req = test::TestRequest::get()
                 .uri("/protected")
@@ -455,7 +490,7 @@ mod tests {
     async fn test_middleware_with_malformed_jwt_structure() {
         let app = test::init_service(
             App::new()
-                .wrap(JwtMiddleware)
+                .wrap(JwtMiddleware {secret_key: Arc::new("a".to_string())})
                 .route("/protected", web::get().to(test_handler))
         ).await;
 
@@ -488,7 +523,7 @@ mod tests {
     async fn test_middleware_with_non_utf8_header() {
         let app = test::init_service(
             App::new()
-                .wrap(JwtMiddleware)
+                .wrap(JwtMiddleware {secret_key: Arc::new("a".to_string())})
                 .route("/protected", web::get().to(test_handler))
         ).await;
 
@@ -511,7 +546,7 @@ mod tests {
     async fn test_middleware_with_very_long_token() {
         let app = test::init_service(
             App::new()
-                .wrap(JwtMiddleware)
+                .wrap(JwtMiddleware {secret_key: Arc::new("a".to_string())})
                 .route("/protected", web::get().to(test_handler))
         ).await;
 
@@ -534,7 +569,7 @@ mod tests {
     #[tokio::test]
     async fn test_middleware_transform_creation() {
         // Test that the transform can be created
-        let middleware = JwtMiddleware;
+        let middleware = JwtMiddleware {secret_key: Arc::new("a".to_string())};
         
         // Create a mock service
         let _service = test::init_service(
@@ -554,6 +589,11 @@ mod tests {
         let claims = Claims {
             sub: "test@example.com".to_string(),
             exp: 1234567890,
+            iat: 1234567800,
+            data: serde_json::json!({
+                "email": "test@example.com",
+                "role": "user"
+            }),
         };
 
         // Test serialization
@@ -562,7 +602,7 @@ mod tests {
         assert!(serialized.contains("1234567890"));
 
         // Test deserialization
-        let deserialized: Claims = serde_json::from_str(&serialized).unwrap();
+        let deserialized: Claims<Value> = serde_json::from_str(&serialized).unwrap();
         assert_eq!(deserialized.sub, claims.sub);
         assert_eq!(deserialized.exp, claims.exp);
     }
@@ -572,6 +612,11 @@ mod tests {
         let claims = Claims {
             sub: "test@example.com".to_string(),
             exp: 1234567890,
+            iat: 1234567800,
+            data: serde_json::json!({
+                "email": "test@example.com",
+                "role": "user"
+            }),
         };
 
         let debug_str = format!("{:?}", claims);
@@ -582,12 +627,13 @@ mod tests {
     // Integration test combining middleware with other middleware
     #[tokio::test]
     async fn test_middleware_with_other_middleware() {
+        let config = AppConfig::global();
         let token = create_valid_token("test@example.com", 60);
         
         let app = test::init_service(
             App::new()
                 .wrap(DefaultHeaders::new().add(("X-Test", "test")))
-                .wrap(JwtMiddleware)
+                .wrap(JwtMiddleware {secret_key: Arc::new(config.secret_key.clone())})
                 .route("/protected", web::get().to(test_handler))
         ).await;
 

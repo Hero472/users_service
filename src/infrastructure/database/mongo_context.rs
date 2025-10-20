@@ -56,13 +56,11 @@ impl MongoContext {
     }
 
     fn validate_mongo_uri(uri: &str) -> Result<(), Box<dyn Error>> {
-        // Trim and check for empty string
         let trimmed_uri = uri.trim();
         if trimmed_uri.is_empty() {
             return Err("Invalid MongoDB URI: cannot be empty or whitespace".into());
         }
 
-        // Basic validation: URI should start with mongodb:// or mongodb+srv://
         if !trimmed_uri.starts_with("mongodb://") && !trimmed_uri.starts_with("mongodb+srv://") {
             return Err(format!("Invalid MongoDB URI: must start with 'mongodb://' or 'mongodb+srv://'. Got: {}", uri).into());
         }
@@ -107,7 +105,6 @@ mod tests {
         email: String,
     }
 
-    // Test with MongoDB memory server (using test containers)
     #[tokio::test]
     // #[ignore = "Requires MongoDB running or test containers"]
     async fn test_mongo_context_init_success() {
@@ -119,12 +116,10 @@ mod tests {
         // This will only pass if MongoDB is running locally
         if let Ok(context) = result {
             assert_eq!(context.get_db().name(), "test_db");
-            // Verify we can actually use the connection
             let collection: Collection<TestUser> = context.collection("test_users");
             let count = collection.count_documents(doc! {}).await.unwrap();
-            assert!(count <= u64::MAX); // Should not panic
+            assert!(count <= u64::MAX);
         } else {
-            // If MongoDB isn't running, skip the test
             println!("MongoDB not available, skipping test");
         }
     }
@@ -157,7 +152,6 @@ mod tests {
         assert!(MongoContext::validate_mongo_uri("mongodb").is_err());
     }
 
-    // Test database and client getters
     #[tokio::test]
     // #[ignore = "Requires MongoDB running"]
     async fn test_get_db_and_client() {
@@ -174,16 +168,12 @@ mod tests {
         }
     }
 
-    // Test error handling for connection failures
     #[tokio::test]
     async fn test_mongo_context_connection_failure() {
-        // Try to connect to a non-existent MongoDB instance
         let result = MongoContext::init("mongodb://invalid-host:9999", "test_db").await;
         
-        // This should fail with a connection error
         assert!(result.is_err());
         
-        // The error should be related to connection failure
         let error = result.unwrap_err();
         let error_str = error.to_string();
         assert!(
@@ -193,19 +183,15 @@ mod tests {
         );
     }
 
-    // Test clone implementation
     #[tokio::test]
-    // #[ignore = "Requires MongoDB running"]
     async fn test_context_clone() {
         let result = MongoContext::init("mongodb://localhost:27017", "test_db").await;
         
         if let Ok(context) = result {
             let cloned = context.clone();
             
-            // Both should reference the same database
             assert_eq!(context.get_db().name(), cloned.get_db().name());
             
-            // Both should be usable
             let coll1: Collection<TestUser> = context.collection("users");
             let coll2: Collection<TestUser> = cloned.collection("users");
             
